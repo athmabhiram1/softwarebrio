@@ -93,13 +93,16 @@ async def _process_single(domain: str, idx: int, n: int) -> tuple[CompanyRecord,
     cleaned_text: str = concat.get("text", "")
     found_li: list[str] = concat.get("found_linkedin_urls", [])
     found_em: list[str] = concat.get("found_emails", [])
+    if not cleaned_text.strip():
+        rec = CompanyRecord(company_overview="", target_audience="", contact_points=[], leadership=[], confidence_score=0.05, errors=[*errors_fetch] if errors_fetch else ["no usable cleaned text after fetch/clean"])
+        sec = time.perf_counter() - t0
+        print(f"[{idx}/{n}] {domain}: {mix} | raw {raw_kb:.1f}KB → clean 0.0KB (~0 tok) | LLM 0/0 tok $0.0000 | conf 0.05 | {sec:.1f}s")
+        return rec, 0, 0.0
     clean_kb = len(cleaned_text) / 1024
     est_tok = cleaner.estimate_tokens(cleaned_text)
     try:
         rec, meta = extractor.extract_domain(domain, cleaned_text, found_li, found_em, pages_ok, pages_total, degraded=degraded)
     except Exception as e:
-        # extract raised outside its own partial path: keep fetch-stage
-        # errors alongside the extractor error instead of dropping them.
         rec = CompanyRecord(company_overview="", target_audience="", contact_points=[], leadership=[], confidence_score=0.05, errors=[*errors_fetch, f"{type(e).__name__}: {e}"])
         model = config.GROQ_MODEL if config.MODEL_PROVIDER == "groq" else config.OLLAMA_MODEL
         meta = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0, "model": model}
@@ -127,6 +130,8 @@ async def run_batch(domains: list[str], out_path: str, provider: str | None = No
             records.append(rec)
             total_tokens += tok
             total_cost += cost
+            if not rec.company_overview.strip() and not rec.target_audience.strip() and not rec.contact_points and not any(le.name.strip() or le.title.strip() or le.linkedin_url.strip() for le in rec.leadership):
+                domains_failed += 1
         except Exception as e:
             sec = time.perf_counter() - t0
             rec = CompanyRecord(company_overview="", target_audience="", contact_points=[], leadership=[], confidence_score=0.05, errors=[str(e)])

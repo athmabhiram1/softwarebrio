@@ -1,6 +1,7 @@
 """cleaner.py — regex pre-pass + trafilatura→BS4 + token-capped concat."""
 from __future__ import annotations
 
+import html
 import re
 from urllib.parse import urlparse
 
@@ -19,12 +20,14 @@ except Exception:  # pragma: no cover
 
 
 def regex_prepass(raw_html: str) -> dict:
+    decoded = html.unescape(raw_html)
+    decoded = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), decoded)
     li_pat = re.compile(r"linkedin\.com/(?:in|company)/[\w-]+", re.I)
     mailto_pat = re.compile(r"mailto:([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", re.I)
     email_pat = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
     seen_li: set[str] = set()
     linkedin_urls: list[str] = []
-    for m in li_pat.finditer(raw_html):
+    for m in li_pat.finditer(decoded):
         u = m.group(0)
         norm = u if u.lower().startswith("https://") else f"https://{u}"
         if norm not in seen_li:
@@ -32,11 +35,10 @@ def regex_prepass(raw_html: str) -> dict:
             linkedin_urls.append(norm)
     seen_em: set[str] = set()
     emails: list[str] = []
-    # collect in order of appearance across both patterns
     candidates: list[tuple[int, str]] = []
-    for m in mailto_pat.finditer(raw_html):
+    for m in mailto_pat.finditer(decoded):
         candidates.append((m.start(1), m.group(1).lower()))
-    for m in email_pat.finditer(raw_html):
+    for m in email_pat.finditer(decoded):
         candidates.append((m.start(0), m.group(0).lower()))
     candidates.sort(key=lambda x: x[0])
     for _, e in candidates:

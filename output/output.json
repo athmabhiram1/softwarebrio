@@ -1,13 +1,12 @@
 {
   "records": [
     {
-      "company_overview": "Postman is the leading collaboration platform for API-development, used by more than 40 million users and 500,000 companies worldwide. Postman is an elegant, flexible environment used to build connected software via APIs, quickly, easily and accurately.",
-      "target_audience": "Engineers and API developers across individuals, teams, and enterprises.",
+      "company_overview": "Postman is the leading collaboration platform for API-development, used by more than 40 million users and 500,000 companies worldwide. Postman simplifies each step of the API lifecycle and streamlines collaboration so you can create better APIs\u2014faster.",
+      "target_audience": "Engineers, developers, and teams building and managing APIs at all scales.",
       "contact_points": [
         "info@postman.com",
         "info-jp@postman.com",
-        "accommodations@postman.com",
-        "+1 415 796 6470"
+        "accommodations@postman.com"
       ],
       "leadership": [
         {
@@ -31,8 +30,8 @@
       "domain": "postman.com"
     },
     {
-      "company_overview": "Supabase is an open-source Firebase alternative built on Postgres, offering a full suite of backend services including authentication, real-time, storage, and edge functions. It provides developers with a scalable, developer-friendly platform that is fully open-source and community-driven.",
-      "target_audience": "Developers building web and mobile applications, startups, and SaaS companies looking for a scalable, open-source backend.",
+      "company_overview": "Supabase is an open\u2011source Firebase alternative that provides a Postgres database, authentication, storage, real\u2011time, and edge functions, all managed through a single dashboard. It offers a fully managed, scalable platform with built\u2011in Row Level Security and instant REST APIs for rapid application development.",
+      "target_audience": "Developers building web and mobile applications, startups, and enterprises looking for a scalable, open\u2011source backend.",
       "contact_points": [],
       "leadership": [
         {
@@ -48,8 +47,8 @@
       "domain": "supabase.com"
     },
     {
-      "company_overview": "Vapi is a unified platform that enables enterprises to build, test, and deploy voice agents quickly, ensuring fast, high-quality support for customers. It offers orchestration, real-time monitoring, and enterprise-grade configurability, allowing companies to scale to millions of calls with sub-500ms latency while maintaining high CSAT scores.",
-      "target_audience": "Enterprises and Fortune 100 companies seeking scalable, secure, and compliant voice agent platforms.",
+      "company_overview": "Vapi is a unified platform that enables enterprises to build, test, and deploy voice agents quickly. It offers orchestration, real-time monitoring, and enterprise-grade configurability for scalable, secure deployments.",
+      "target_audience": "Large enterprises and Fortune 100 companies seeking scalable, secure, and compliant voice agent solutions.",
       "contact_points": [],
       "leadership": [
         {
@@ -66,9 +65,9 @@
     }
   ],
   "summary": {
-    "total_tokens": 20361,
-    "total_cost_usd": 0.001423,
-    "total_runtime_s": 46.8,
+    "total_tokens": 19955,
+    "total_cost_usd": 0.001306,
+    "total_runtime_s": 49.11,
     "domains_failed": 0
   }
 }

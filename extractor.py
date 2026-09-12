@@ -11,16 +11,38 @@ from openai import OpenAI
 import httpx
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", re.I)
-PHONE_RE = re.compile(r"\+?\d[\d\s\-\(\)]{6,}\d")
 
 
 def _keep_contact(c: str) -> bool:
     s = c.strip()
-    if EMAIL_RE.fullmatch(s):
-        return True
-    if PHONE_RE.search(s) and len(re.sub(r"\D", "", s)) >= 7:
-        return True
-    return False
+    if not EMAIL_RE.fullmatch(s):
+        return False
+    if re.search(r"\\u[0-9a-fA-F]{4}", s):
+        return False
+    if re.search(r"&[A-Za-z0-9#]+;", s):
+        return False
+    try:
+        domain = s.split("@", 1)[1].lower()
+    except IndexError:
+        return False
+    if domain in {"example.com", "example.org", "example.net"}:
+        return False
+    tld = domain.rsplit(".", 1)[-1] if "." in domain else ""
+    if tld in {"example", "test", "localhost", "invalid"}:
+        return False
+    return True
+
+
+def _check_names(cleaned_text: str, leadership: list) -> list[str]:
+    missing: list[str] = []
+    lower_text = (cleaned_text or "").lower()
+    for le in leadership:
+        name = le.name.strip() if hasattr(le, "name") else ""
+        if not name:
+            continue
+        if name.lower() not in lower_text:
+            missing.append(name)
+    return missing
 
 
 def build_messages(
@@ -222,4 +244,10 @@ def extract_domain(
         if "linkedin.com/company/" in le.linkedin_url.lower():
             rec.errors.append(f"company-page URL attributed to a person: {le.name}")
             break
+    missing_names = _check_names(cleaned_text, payload.leadership)
+    for name in missing_names:
+        rec.errors.append(f"name not found in source text - possible LLM invention: {name}")
+    if payload.leadership and missing_names:
+        name_penalty = 0.20 * (len(missing_names) / len(payload.leadership))
+        rec.confidence_score = round(max(0.05, rec.confidence_score - name_penalty), 2)
     return rec, meta

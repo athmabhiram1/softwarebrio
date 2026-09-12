@@ -67,7 +67,7 @@ class FakeClient:
 VALID_PAYLOAD = {
     "company_overview": "Acme does X. It serves Y.",
     "target_audience": "Developers building APIs",
-    "contact_points": ["support@example.com"],
+    "contact_points": ["support@real.io"],
     "leadership": [{"name": "Alice", "title": "CEO", "linkedin_url": "linkedin.com/in/alice"}],
 }
 VALID_JSON = json.dumps(VALID_PAYLOAD)
@@ -138,7 +138,7 @@ def test_valid_json_record_and_hand_computed_confidence(monkeypatch):
     # monkeypatch get_client inside extract_domain
     monkeypatch.setattr(extractor, "get_client", lambda: fake)
     monkeypatch.setattr(config, "MODEL_PROVIDER", "groq")
-    rec, meta = extract_domain("example.com", "cleaned text", ["linkedin.com/in/alice"], ["a@b.com"], 3, 4)
+    rec, meta = extract_domain("example.com", "cleaned text Alice", ["linkedin.com/in/alice"], ["a@b.com"], 3, 4)
     assert rec.company_overview == VALID_PAYLOAD["company_overview"]
     assert rec.errors == []
     expected = compute_confidence(4, 3, 4, "regex", 0)
@@ -240,8 +240,8 @@ def test_contacts_filtered_to_email_and_phone(monkeypatch):
     }
     fake = FakeClient([FakeResp(json.dumps(payload_dict))])
     monkeypatch.setattr(extractor, "get_client", lambda: fake)
-    rec, meta = extract_domain("example.com", "text", [], [], 1, 1)
-    assert rec.contact_points == ["sales@x.com", "+1 415 123 4567"]
+    rec, meta = extract_domain("example.com", "text Alice", [], [], 1, 1)
+    assert rec.contact_points == ["sales@x.com"]
     print(f"filtered contacts: {rec.contact_points}")
     assert rec.confidence_score == compute_confidence(4, 1, 1, "inferred", 0)
 
@@ -256,7 +256,7 @@ def test_contacts_filter_recomputes_F_when_all_invalid(monkeypatch):
     }
     fake = FakeClient([FakeResp(json.dumps(payload_dict))])
     monkeypatch.setattr(extractor, "get_client", lambda: fake)
-    rec, meta = extract_domain("example.com", "text", [], [], 1, 1)
+    rec, meta = extract_domain("example.com", "Alice text", [], [], 1, 1)
     assert rec.contact_points == []
     expected = compute_confidence(3, 1, 1, "none", 0)
     assert rec.confidence_score == expected
@@ -273,7 +273,7 @@ def test_leadership_company_page_flag(monkeypatch):
     }
     fake = FakeClient([FakeResp(json.dumps(payload_dict))])
     monkeypatch.setattr(extractor, "get_client", lambda: fake)
-    rec, meta = extract_domain("example.com", "text", [], [], 1, 1)
+    rec, meta = extract_domain("example.com", "J text", [], [], 1, 1)
     assert any("company-page URL attributed to a person: J" in e for e in rec.errors)
     assert rec.confidence_score == compute_confidence(4, 1, 1, "inferred", 0)
     print(f"company-page errors: {rec.errors} conf={rec.confidence_score}")
@@ -296,7 +296,7 @@ def test_domain_threaded_end_to_end(monkeypatch):
     monkeypatch.setattr(time, "sleep", lambda x: None)
     fake = FakeClient([FakeResp(VALID_JSON)])
     monkeypatch.setattr(extractor, "get_client", lambda: fake)
-    rec, meta = extract_domain("acme.com", "cleaned text", ["linkedin.com/in/alice"], ["a@b.com"], 3, 4)
+    rec, meta = extract_domain("acme.com", "cleaned text Alice", ["linkedin.com/in/alice"], ["a@b.com"], 3, 4)
     assert rec.domain == "acme.com"
     print(f"domain threaded: {rec.domain}")
     from models import CompanyRecord
@@ -310,3 +310,254 @@ def test_domain_threaded_end_to_end(monkeypatch):
     assert rec3.domain == ""
     rec4 = CompanyRecord.from_payload(payload, confidence_score=0.9, errors=[], domain="example.org")
     assert rec4.domain == "example.org"
+
+
+def test_contacts_email_only_hardening(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com", "+1 415 796 6470", "1-877-HEY-VAPI"],
+        "leadership": [{"name": "Alice", "title": "CEO", "linkedin_url": "https://linkedin.com/in/alice"}],
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    rec, meta = extract_domain("example.com", "text Alice", [], [], 1, 1)
+    assert rec.contact_points == ["sales@x.com"]
+    print(f"email-only hardening: {rec.contact_points} -> expected ['sales@x.com']")
+
+
+def test_leadership_name_present_no_penalty(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com"],
+        "leadership": [{"name": "Alice Johnson", "title": "CEO", "linkedin_url": "https://linkedin.com/in/alice"}],
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    cleaned = "Our CEO Alice Johnson leads the company. Acme does X."
+    rec, meta = extract_domain("example.com", cleaned, ["linkedin.com/in/alice"], ["a@b.com"], 3, 4)
+    assert rec.errors == []
+    assert rec.confidence_score == 0.94
+    print(f"name present: errors={rec.errors} conf={rec.confidence_score} expected 0.94 no penalty")
+
+
+def test_leadership_name_absent_penalty(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com"],
+        "leadership": [{"name": "Alice Johnson", "title": "CEO", "linkedin_url": "https://linkedin.com/in/alice"}],
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    cleaned = "No leadership mentioned here, just product description."
+    rec, meta = extract_domain("example.com", cleaned, ["linkedin.com/in/alice"], ["a@b.com"], 3, 4)
+    assert any("name not found in source text - possible LLM invention: Alice Johnson" in e for e in rec.errors)
+    assert rec.confidence_score == 0.74, f"got {rec.confidence_score} expected 0.74"
+    print(f"name absent: errors={rec.errors} conf={rec.confidence_score} expected 0.74 (0.94-0.20)")
+
+
+def test_leadership_empty_name_skipped(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com"],
+        "leadership": [{"name": "   ", "title": "CEO", "linkedin_url": "https://linkedin.com/in/alice"}],
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    rec, meta = extract_domain("example.com", "cleaned text", [], [], 1, 1)
+    assert rec.errors == []
+    expected = compute_confidence(4, 1, 1, "inferred", 0)
+    assert rec.confidence_score == expected
+    print(f"empty name skipped: errors={rec.errors} conf={rec.confidence_score} expected {expected}")
+
+
+def test_company_flag_and_name_flag_coexist(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com"],
+        "leadership": [{"name": "Bob Smith", "title": "CTO", "linkedin_url": "https://linkedin.com/company/acme"}],
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    cleaned = "Product description without Bob Smith"
+    cleaned_no_name = "Product description without any leader"
+    rec, meta = extract_domain("example.com", cleaned_no_name, [], [], 1, 1)
+    assert any("company-page URL attributed to a person: Bob Smith" in e for e in rec.errors)
+    assert any("name not found in source text - possible LLM invention: Bob Smith" in e for e in rec.errors)
+    assert len([e for e in rec.errors if "Bob Smith" in e]) == 2
+    base = compute_confidence(4, 1, 1, "inferred", 0)
+    expected = round(max(0.05, base - 0.2), 2)
+    assert rec.confidence_score == expected, f"got {rec.confidence_score} expected {expected} base {base}"
+    print(f"coexist flags: errors={rec.errors} conf={rec.confidence_score} base={base} -> {expected}")
+
+
+def test_empty_cleaned_text_skips_llm(monkeypatch, capsys):
+    import main, fetcher, cleaner
+
+    async def fake_fetch(domain, client=None):
+        html = "<html><body></body></html>"
+        url = f"https://{domain}"
+        return {"domain": domain, "pages": {url: html}, "methods": {url: "httpx"}, "errors": ["fetch error: timeout"]}
+
+    called = {"hit": False}
+
+    def boom(*a, **kw):
+        called["hit"] = True
+        raise AssertionError("extract_domain must NOT be called on empty cleaned text")
+
+    monkeypatch.setattr(fetcher, "fetch_domain", fake_fetch)
+    monkeypatch.setattr(extractor, "extract_domain", boom)
+    monkeypatch.setattr(cleaner, "concat_domain", lambda pages: {"text": "   ", "found_linkedin_urls": [], "found_emails": []})
+    monkeypatch.setattr(cleaner, "clean_page", lambda html: {"text": "", "path": "bs4", "raw_len": len(html), "clean_len": 0})
+    monkeypatch.setattr(cleaner, "estimate_tokens", lambda text: 0)
+
+    import asyncio
+    rec, tok, cost = asyncio.run(main._process_single("empty.com", 1, 1))
+    assert not called["hit"], "extract_domain was called on empty cleaned text"
+    assert rec.company_overview == ""
+    assert rec.target_audience == ""
+    assert rec.contact_points == []
+    assert rec.leadership == []
+    assert rec.confidence_score == 0.05
+    assert "fetch error: timeout" in rec.errors
+    assert not any("AssertionError" in e for e in rec.errors)
+    assert tok == 0
+    assert cost == 0.0
+    out = capsys.readouterr().out
+    assert "empty.com" in out
+    assert "conf 0.05" in out
+    assert "LLM 0/0" in out
+    print(f"empty cleaned -> skip LLM: errors={rec.errors} tok={tok} cost={cost} conf={rec.confidence_score}")
+
+
+def test_zero_populated_increments_domains_failed(tmp_path, monkeypatch):
+    import main, fetcher, cleaner
+
+    async def fake_fetch(domain, client=None):
+        html = "<html></html>"
+        url = f"https://{domain}"
+        return {"domain": domain, "pages": {url: html}, "methods": {url: "httpx"}, "errors": []}
+
+    monkeypatch.setattr(fetcher, "fetch_domain", fake_fetch)
+    monkeypatch.setattr(cleaner, "concat_domain", lambda pages: {"text": "", "found_linkedin_urls": [], "found_emails": []})
+    monkeypatch.setattr(cleaner, "clean_page", lambda html: {"text": "", "path": "bs4", "raw_len": 0, "clean_len": 0})
+    monkeypatch.setattr(cleaner, "estimate_tokens", lambda text: 0)
+    monkeypatch.setattr(extractor, "extract_domain", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not be called")))
+
+    import asyncio
+    out = tmp_path / "out_empty.json"
+    data = asyncio.run(main.run_batch(["empty1.com", "empty2.com"], str(out), provider="groq"))
+    assert data["summary"]["domains_failed"] == 2
+    for r in data["records"]:
+        assert r["confidence_score"] == 0.05
+        assert r["company_overview"] == ""
+        assert r["target_audience"] == ""
+        assert r["contact_points"] == []
+        assert r["leadership"] == []
+    print(f"zero-populated domains_failed={data['summary']['domains_failed']}")
+
+
+def test_contact_hygiene_reserved_domains():
+    from extractor import _keep_contact
+
+    inputs = ["a@example.com", "b@example.org", "c@example.net", "d@foo.test", "e@bar.invalid", "f@x.localhost", "ok@real.io"]
+    kept = [c for c in inputs if _keep_contact(c)]
+    assert kept == ["ok@real.io"], f"got {kept}"
+    assert not _keep_contact("x@Y.TEST")
+    assert not _keep_contact("x@y.INVALID")
+    assert not _keep_contact("x@y.LOCALHOST")
+    print(f"contact hygiene reserved filtered -> {kept}")
+
+
+def test_contact_hygiene_escape_and_entity_remnants():
+    from extractor import _keep_contact
+
+    assert not _keep_contact("me\\u003e@x.com")
+    assert not _keep_contact("a\\u0041@x.com")
+    assert not _keep_contact("a&amp;b@x.com")
+    assert not _keep_contact("x&#39;@y.com")
+    assert not _keep_contact("foo&test;@bar.com")
+    assert _keep_contact("ok@real.io")
+    assert _keep_contact("sales@company.com")
+    print("escape/entity remnants rejected, valid kept")
+
+
+def test_proportional_name_penalty_1_of_8(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    names = [f"Person {i}" for i in range(8)]
+    leadership = [{"name": n, "title": "CEO", "linkedin_url": "https://linkedin.com/in/x"} for n in names]
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com"],
+        "leadership": leadership,
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    cleaned = " ".join(names[:7])
+    rec, meta = extract_domain("example.com", cleaned, ["linkedin.com/in/x"], ["a@b.com"], 3, 4)
+    base = compute_confidence(4, 3, 4, "regex", 0)
+    assert base == 0.94, f"base {base}"
+    penalty = 0.20 * (1 / 8)
+    expected = round(max(0.05, base - penalty), 2)
+    assert rec.confidence_score == expected, f"got {rec.confidence_score} expected {expected} base {base} penalty {penalty}"
+    print(f"1/8 penalty: base={base} penalty={penalty} -> {expected} got={rec.confidence_score}")
+
+
+def test_proportional_name_penalty_8_of_8(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    names = [f"Person {i}" for i in range(8)]
+    leadership = [{"name": n, "title": "CEO", "linkedin_url": "https://linkedin.com/in/x"} for n in names]
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com"],
+        "leadership": leadership,
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    cleaned = "No leadership mentioned here, just product description."
+    rec, meta = extract_domain("example.com", cleaned, ["linkedin.com/in/x"], ["a@b.com"], 3, 4)
+    base = compute_confidence(4, 3, 4, "regex", 0)
+    assert base == 0.94
+    penalty = 0.20 * (8 / 8)
+    expected = round(max(0.05, base - penalty), 2)
+    assert rec.confidence_score == expected, f"got {rec.confidence_score} expected {expected}"
+    print(f"8/8 penalty: base={base} penalty={penalty} -> {expected} got={rec.confidence_score}")
+
+
+def test_proportional_name_penalty_empty_leadership_no_penalty(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda x: None)
+    payload_dict = {
+        "company_overview": "Acme does X. It serves Y.",
+        "target_audience": "Developers",
+        "contact_points": ["sales@x.com"],
+        "leadership": [],
+    }
+    fake = FakeClient([FakeResp(json.dumps(payload_dict))])
+    monkeypatch.setattr(extractor, "get_client", lambda: fake)
+    cleaned = "Empty leadership case"
+    rec, meta = extract_domain("example.com", cleaned, ["linkedin.com/in/x"], ["a@b.com"], 3, 4)
+    base = compute_confidence(3, 3, 4, "regex", 0)
+    assert rec.confidence_score == base
+    print(f"empty leadership no penalty: base={base} got={rec.confidence_score}")
+
+
+def test_regex_prepass_decodes_entities_and_unicode():
+    from cleaner import regex_prepass
+
+    html = "Contact: a&#64;b.com and c\\u0040d.com plus Sales&#64;Example.COM"
+    result = regex_prepass(html)
+    emails = result["emails"]
+    assert "a@b.com" in emails, f"got {emails}"
+    assert "c@d.com" in emails, f"got {emails}"
+    print(f"prepass decoded emails={emails}")
