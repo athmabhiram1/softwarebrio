@@ -39,6 +39,7 @@ class CompanyRecord(_StrictModel):
     confidence_score: float = Field(ge=0.0, le=1.0)
     errors: list[str] = Field(default_factory=list)
     domain: str = ""
+    leadership_sources: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
     def from_payload(

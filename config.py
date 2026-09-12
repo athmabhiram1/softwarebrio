@@ -31,6 +31,13 @@ def _get_float(name: str, default: float) -> float:
         return default
 
 
+def _get_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 # --- LLM provider selection -------------------------------------------------
 # "groq" (default, free tier) or "ollama" (local fallback). Both go through
 # the `openai` SDK OpenAI-compat client — there is no `groq`/`ollama` package.
@@ -97,3 +104,18 @@ OUTPUT_PATH: str = os.getenv("OUTPUT_PATH", "output.local.json")
 # --- Bonus seam (NOT-BUILT): search fallback -----------------------------------
 # Read here so the seam needs zero rework later; never called by core.
 TAVILY_API_KEY: str | None = os.getenv("TAVILY_API_KEY")
+TAVILY_TIMEOUT_S: int = _get_int("TAVILY_TIMEOUT_S", 10)
+TAVILY_MAX_RESULTS: int = _get_int("TAVILY_MAX_RESULTS", 5)
+TAVILY_SEARCH_DEPTH: str = os.getenv("TAVILY_SEARCH_DEPTH", "basic")
+TAVILY_QUERY_TEMPLATE: str = os.getenv(
+    "TAVILY_QUERY_TEMPLATE", "{domain} founder OR CEO OR co-founder linkedin"
+)
+TAVILY_INCLUDE_DOMAINS: list[str] = [
+    s.strip().lower()
+    for s in os.getenv("TAVILY_INCLUDE_DOMAINS", "linkedin.com").split(",")
+    if s.strip()
+]
+TAVILY_INCLUDE_DOMAINS_MODE: str = os.getenv("TAVILY_INCLUDE_DOMAINS_MODE", "filter")
+# Kill-switch for hermetic runs (tests/CI): TAVILY_ENABLED=0 skips all live
+# Tavily calls; default true so production behavior is unchanged.
+TAVILY_ENABLED: bool = _get_bool("TAVILY_ENABLED", True)

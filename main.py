@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 import time
 
@@ -11,7 +12,10 @@ import config
 import cleaner
 import fetcher
 import extractor
+import search_fallback
 from models import CompanyRecord
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_domains(value: str) -> list[str]:
@@ -96,7 +100,12 @@ async def _process_single(domain: str, idx: int, n: int) -> tuple[CompanyRecord,
     if not cleaned_text.strip():
         rec = CompanyRecord(company_overview="", target_audience="", contact_points=[], leadership=[], confidence_score=0.05, errors=[*errors_fetch] if errors_fetch else ["no usable cleaned text after fetch/clean"])
         sec = time.perf_counter() - t0
-        print(f"[{idx}/{n}] {domain}: {mix} | raw {raw_kb:.1f}KB → clean 0.0KB (~0 tok) | LLM 0/0 tok $0.0000 | conf 0.05 | {sec:.1f}s")
+        print(f"[{idx}/{n}] {domain}: {mix} | raw {raw_kb:.1f}KB → clean 0.0KB (~0 tok) | LLM 0/0 tok $0.0000 | conf 0.05 | {sec:.1f}s | Tavily 0/0c")
+        try:
+            object.__setattr__(rec, "_tavily_calls", 0)
+            object.__setattr__(rec, "_tavily_credits", 0)
+        except Exception:
+            pass
         return rec, 0, 0.0
     clean_kb = len(cleaned_text) / 1024
     est_tok = cleaner.estimate_tokens(cleaned_text)
@@ -106,11 +115,32 @@ async def _process_single(domain: str, idx: int, n: int) -> tuple[CompanyRecord,
         rec = CompanyRecord(company_overview="", target_audience="", contact_points=[], leadership=[], confidence_score=0.05, errors=[*errors_fetch, f"{type(e).__name__}: {e}"])
         model = config.GROQ_MODEL if config.MODEL_PROVIDER == "groq" else config.OLLAMA_MODEL
         meta = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0, "model": model}
+    tavily_calls = 0
+    tavily_credits = 0
+    tavily_status: int | None = None
+    try:
+        if config.TAVILY_API_KEY and search_fallback.should_trigger(rec):
+            _results, _tmeta = search_fallback.search_tavily(domain)
+            tavily_calls = int(_tmeta.get("tavily_calls", 0))
+            tavily_credits = int(_tmeta.get("tavily_credits", 0))
+            tavily_status = _tmeta.get("tavily_status")
+            meta.update(_tmeta)
+            _cands = search_fallback.extract_linkedin_profiles(_results)
+            if _cands:
+                rec, _sources = search_fallback.enrich_record(rec, _cands, found_li)
+    except Exception as e:
+        logger.warning("search_fallback failed domain=%s type=%s", domain, type(e).__name__)
+        rec.errors.append(f"search_fallback failed: {type(e).__name__}: {e}")
     pt = int(meta.get("prompt_tokens", 0))
     ct = int(meta.get("completion_tokens", 0))
     cost = float(meta.get("cost_usd", 0.0))
     sec = time.perf_counter() - t0
-    print(f"[{idx}/{n}] {domain}: {mix} | raw {raw_kb:.1f}KB → clean {clean_kb:.1f}KB (~{est_tok} tok) | LLM {pt}/{ct} tok ${cost:.4f} | conf {rec.confidence_score:.2f} | {sec:.1f}s")
+    print(f"[{idx}/{n}] {domain}: {mix} | raw {raw_kb:.1f}KB → clean {clean_kb:.1f}KB (~{est_tok} tok) | LLM {pt}/{ct} tok ${cost:.4f} | conf {rec.confidence_score:.2f} | {sec:.1f}s | Tavily {tavily_calls}/{tavily_credits}c")
+    try:
+        object.__setattr__(rec, "_tavily_calls", tavily_calls)
+        object.__setattr__(rec, "_tavily_credits", tavily_credits)
+    except Exception:
+        pass
     return rec, est_tok + pt + ct, cost
 
 
@@ -122,6 +152,8 @@ async def run_batch(domains: list[str], out_path: str, provider: str | None = No
     total_tokens = 0
     total_cost = 0.0
     domains_failed = 0
+    tavily_calls_total = 0
+    tavily_credits_total = 0
     batch_start = time.perf_counter()
     for idx, domain in enumerate(domains, start=1):
         t0 = time.perf_counter()
@@ -130,6 +162,11 @@ async def run_batch(domains: list[str], out_path: str, provider: str | None = No
             records.append(rec)
             total_tokens += tok
             total_cost += cost
+            try:
+                tavily_calls_total += int(getattr(rec, "_tavily_calls", 0) or 0)
+                tavily_credits_total += int(getattr(rec, "_tavily_credits", 0) or 0)
+            except Exception:
+                pass
             if not rec.company_overview.strip() and not rec.target_audience.strip() and not rec.contact_points and not any(le.name.strip() or le.title.strip() or le.linkedin_url.strip() for le in rec.leadership):
                 domains_failed += 1
         except Exception as e:
@@ -137,9 +174,9 @@ async def run_batch(domains: list[str], out_path: str, provider: str | None = No
             rec = CompanyRecord(company_overview="", target_audience="", contact_points=[], leadership=[], confidence_score=0.05, errors=[str(e)])
             records.append(rec)
             domains_failed += 1
-            print(f"[{idx}/{n}] {domain}: httpx | raw 0.0KB → clean 0.0KB (~0 tok) | LLM 0/0 tok $0.0000 | conf 0.05 | {sec:.1f}s")
+            print(f"[{idx}/{n}] {domain}: httpx | raw 0.0KB → clean 0.0KB (~0 tok) | LLM 0/0 tok $0.0000 | conf 0.05 | {sec:.1f}s | Tavily 0/0c")
     total_runtime = time.perf_counter() - batch_start
-    summary = {"total_tokens": total_tokens, "total_cost_usd": round(total_cost, 6), "total_runtime_s": round(total_runtime, 2), "domains_failed": domains_failed}
+    summary = {"total_tokens": total_tokens, "total_cost_usd": round(total_cost, 6), "total_runtime_s": round(total_runtime, 2), "domains_failed": domains_failed, "tavily_calls": tavily_calls_total, "tavily_credits": tavily_credits_total}
     out_data = {"records": [r.model_dump() for r in records], "summary": summary}
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(out_data, f, indent=2)

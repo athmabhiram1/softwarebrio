@@ -203,7 +203,7 @@ def compute_confidence(
     degraded: int,
 ) -> float:
     p_ratio = (pages_ok / pages_total) if pages_total else 0
-    c_val = {"regex": 1.0, "inferred": 0.5, "none": 0.0}[contact_mode]
+    c_val = {"regex": 1.0, "inferred": 0.5, "search_fallback": 0.25, "none": 0.0}[contact_mode]
     q_val = {0: 1.0, 1: 0.5}.get(degraded, 0.0)
     raw = (
         0.45 * (f_pop / config.LLM_FIELD_COUNT)
