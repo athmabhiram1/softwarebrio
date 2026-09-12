@@ -1,0 +1,11 @@
+services:
+  lead-agent:
+    build: .
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    volumes:
+      - ./output:/app/output
+    command: ["python", "main.py", "--domains", "postman.com,supabase.com,vapi.ai", "--out", "/app/output/output.json"]

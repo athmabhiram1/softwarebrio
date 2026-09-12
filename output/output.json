@@ -1,0 +1,74 @@
+{
+  "records": [
+    {
+      "company_overview": "Postman is the leading collaboration platform for API-development, used by more than 40 million users and 500,000 companies worldwide. Postman is an elegant, flexible environment used to build connected software via APIs, quickly, easily and accurately.",
+      "target_audience": "Engineers and API developers across individuals, teams, and enterprises.",
+      "contact_points": [
+        "info@postman.com",
+        "info-jp@postman.com",
+        "accommodations@postman.com",
+        "+1 415 796 6470"
+      ],
+      "leadership": [
+        {
+          "name": "Abhinav Asthana",
+          "title": "CEO/Co-Founder",
+          "linkedin_url": "https://linkedin.com/in/abhinavasthana"
+        },
+        {
+          "name": "Ankit Sobti",
+          "title": "CTO/Co-Founder",
+          "linkedin_url": "https://linkedin.com/in/ankit-sobti"
+        },
+        {
+          "name": "Abhijit Kane",
+          "title": "Product Architect/Co-Founder",
+          "linkedin_url": "https://linkedin.com/in/abhijitkane"
+        }
+      ],
+      "confidence_score": 0.95,
+      "errors": [],
+      "domain": "postman.com"
+    },
+    {
+      "company_overview": "Supabase is an open-source Firebase alternative built on Postgres, offering a full suite of backend services including authentication, real-time, storage, and edge functions. It provides developers with a scalable, developer-friendly platform that is fully open-source and community-driven.",
+      "target_audience": "Developers building web and mobile applications, startups, and SaaS companies looking for a scalable, open-source backend.",
+      "contact_points": [],
+      "leadership": [
+        {
+          "name": "Jakob Steinn",
+          "title": "Co-founder & Tech Lead",
+          "linkedin_url": "https://linkedin.com/company/supabase"
+        }
+      ],
+      "confidence_score": 0.71,
+      "errors": [
+        "company-page URL attributed to a person: Jakob Steinn"
+      ],
+      "domain": "supabase.com"
+    },
+    {
+      "company_overview": "Vapi is a unified platform that enables enterprises to build, test, and deploy voice agents quickly, ensuring fast, high-quality support for customers. It offers orchestration, real-time monitoring, and enterprise-grade configurability, allowing companies to scale to millions of calls with sub-500ms latency while maintaining high CSAT scores.",
+      "target_audience": "Enterprises and Fortune 100 companies seeking scalable, secure, and compliant voice agent platforms.",
+      "contact_points": [],
+      "leadership": [
+        {
+          "name": "Jason Mitura",
+          "title": "VP of Software Development",
+          "linkedin_url": "https://linkedin.com/company/vapi-ai"
+        }
+      ],
+      "confidence_score": 0.89,
+      "errors": [
+        "company-page URL attributed to a person: Jason Mitura"
+      ],
+      "domain": "vapi.ai"
+    }
+  ],
+  "summary": {
+    "total_tokens": 20361,
+    "total_cost_usd": 0.001423,
+    "total_runtime_s": 46.8,
+    "domains_failed": 0
+  }
+}

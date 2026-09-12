@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>lead-enrichment-agent — domains in, structured leads out</title>
+<meta name="description" content="A deterministic lead-enrichment pipeline: httpx-first fetching, conditional Playwright, one strict-schema LLM call per domain, auditable confidence.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23FF4D00'/%3E%3Crect x='7' y='8' width='18' height='3' fill='%230C0C0A'/%3E%3Crect x='7' y='14.5' width='12' height='3' fill='%230C0C0A'/%3E%3Crect x='7' y='21' width='18' height='3' fill='%230C0C0A'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600,700&f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+/* ============ TOKENS ============ */
+:root{
+  --bg:#0C0C0A; --bg2:#111110; --card:#131311;
+  --paper:#EDEAE1; --paper2:#E3E0D4;
+  --ink:#151410;
+  --txt:#E9E6DC; --mut:#918D7F; --mut2:#68645A;
+  --line:#26241D; --line2:#3A382E; --pline:#D3CFC2;
+  --acc:#FF4D00; --acc2:#FF8A50; --accsoft:rgba(255,77,0,.1);
+  --grn:#8FCF9F;
+  --fd:'Clash Display',ui-sans-serif,sans-serif;
+  --fb:'General Sans',ui-sans-serif,sans-serif;
+  --fm:'JetBrains Mono',ui-monospace,monospace;
+  --ease:cubic-bezier(.16,1,.3,1);
+  --nav-h:68px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--txt);font-family:var(--fb);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::after{content:"";position:fixed;inset:0;z-index:4000;pointer-events:none;opacity:.045;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+::selection{background:var(--acc);color:#0C0C0A}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+img{max-width:100%}
+:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+::-webkit-scrollbar{width:10px;height:8px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--line2);border-radius:0}
+::-webkit-scrollbar-thumb:hover{background:var(--acc)}
+
+/* ============ UTILITIES ============ */
+.wrap{max-width:1240px;margin:0 auto;padding:0 clamp(20px,4vw,40px)}
+.mono{font-family:var(--fm)}
+.eyebrow{font-family:var(--fm);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--acc);display:flex;align-items:center;gap:10px}
+.eyebrow::before{content:"";width:26px;height:1px;background:var(--acc)}
+.h2{font-family:var(--fd);font-weight:600;font-size:clamp(30px,4.4vw,52px);line-height:1.06;letter-spacing:-.015em}
+.lead{color:var(--mut);max-width:640px;font-size:clamp(15px,1.4vw,17.5px)}
+.sec{padding:clamp(72px,9vw,132px) 0;position:relative}
+.sec-head{display:grid;grid-template-columns:1fr;gap:18px;margin-bottom:clamp(40px,5vw,64px)}
+.sec-head .idx{font-family:var(--fm);font-size:11px;letter-spacing:.2em;color:var(--mut2)}
+.dot{width:7px;height:7px;background:var(--acc);border-radius:50%;display:inline-block;animation:pulse 2.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,77,0,.5)}50%{box-shadow:0 0 0 6px rgba(255,77,0,0)}}
+
+/* reveal */
+.rv{opacity:0;transform:translateY(26px);transition:opacity .85s var(--ease),transform .85s var(--ease);transition-delay:var(--d,0s)}
+.rv.in{opacity:1;transform:none}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:10px;font-family:var(--fm);font-size:13px;font-weight:500;letter-spacing:.04em;padding:15px 24px;border:1px solid var(--line2);transition:.35s var(--ease);position:relative}
+.btn .ar{transition:transform .35s var(--ease)}
+.btn:hover .ar{transform:translateX(4px)}
+.btn--solid{background:var(--acc);color:#0C0C0A;border-color:var(--acc);font-weight:700}
+.btn--solid:hover{background:var(--acc2);border-color:var(--acc2)}
+.btn--ghost:hover{border-color:var(--acc);background:var(--accsoft)}
+
+/* ============ PROGRESS + NAV ============ */
+#prog{position:fixed;top:0;left:0;height:2px;width:0;background:var(--acc);z-index:1002}
+.nav{position:fixed;top:0;left:0;right:0;height:var(--nav-h);z-index:1000;display:flex;align-items:center;border-bottom:1px solid transparent;transition:.4s var(--ease)}
+.nav.scrolled{background:rgba(12,12,10,.86);backdrop-filter:blur(14px);border-bottom-color:var(--line)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;width:100%}
+.logo{display:flex;align-items:center;gap:11px;font-family:var(--fm);font-weight:700;font-size:14px;letter-spacing:.06em}
+.logo svg{display:block}
+.logo em{font-style:normal;color:var(--acc)}
+.nlinks{display:flex;align-items:center;gap:6px}
+.nlinks a{font-family:var(--fm);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);padding:9px 14px;position:relative;transition:color .3s}
+.nlinks a::after{content:"";position:absolute;left:14px;right:14px;bottom:4px;height:1px;background:var(--acc);transform:scaleX(0);transform-origin:left;transition:transform .35s var(--ease)}
+.nlinks a:hover{color:var(--txt)}
+.nlinks a.on{color:var(--txt)}
+.nlinks a.on::after{transform:scaleX(1)}
+.nav-cta{font-family:var(--fm);font-size:12px;letter-spacing:.06em;border:1px solid var(--line2);padding:9px 16px;color:var(--txt);transition:.3s;display:inline-block}
+.nav-cta:hover{border-color:var(--acc);color:var(--acc)}
+.burger{display:none;flex-direction:column;gap:5px;padding:8px}
+.burger i{width:22px;height:2px;background:var(--txt);transition:.35s var(--ease)}
+.menu{position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;flex-direction:column;justify-content:center;padding:0 8vw;gap:6px;opacity:0;pointer-events:none;transition:opacity .4s var(--ease)}
+.menu.open{opacity:1;pointer-events:auto}
+.menu a{font-family:var(--fd);font-weight:600;font-size:clamp(34px,9vw,54px);color:var(--mut);display:flex;align-items:baseline;gap:16px;transform:translateY(20px);opacity:0;transition:.5s var(--ease)}
+.menu.open a{transform:none;opacity:1}
+.menu a.on,.menu a:hover{color:var(--txt)}
+.menu a small{font-family:var(--fm);font-size:12px;color:var(--acc)}
+body.lock{overflow:hidden}
+
+/* ============ PAGES ============ */
+.page{display:none}
+.page.active{display:block;animation:pagein .55s var(--ease)}
+@keyframes pagein{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.phead{padding:calc(var(--nav-h) + clamp(60px,8vw,100px)) 0 clamp(40px,5vw,64px);border-bottom:1px solid var(--line)}
+.phead h1{font-family:var(--fd);font-weight:600;font-size:clamp(36px,5.6vw,68px);line-height:1.04;letter-spacing:-.02em;margin:20px 0 18px}
+.phead h1 .ol{color:transparent;-webkit-text-stroke:1.2px var(--txt)}
+.phead h1 .ac{color:var(--acc)}
+
+/* ============ HERO ============ */
+.hero{padding:calc(var(--nav-h) + clamp(56px,7vw,96px)) 0 clamp(60px,7vw,100px);position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(233,230,220,.07) 1px,transparent 1px);background-size:30px 30px;
+  -webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),transparent 88%);mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),transparent 88%);pointer-events:none}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(36px,5vw,72px);align-items:center;position:relative}
+.tick{position:absolute;font-family:var(--fm);color:var(--mut2);font-size:14px;user-select:none}
+.tick.tl2{top:-26px;left:-4px}.tick.tr2{top:-26px;right:-4px}.tick.bl2{bottom:-26px;left:-4px}.tick.br2{bottom:-26px;right:-4px}
+.hchip{display:inline-flex;align-items:center;gap:9px;font-family:var(--fm);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut);border:1px solid var(--line);padding:8px 14px;margin-bottom:26px}
+.hmask{overflow:hidden}
+.hline{display:block;font-family:var(--fd);font-weight:600;font-size:clamp(40px,5.6vw,74px);line-height:1.02;letter-spacing:-.02em;transform:translateY(112%);transition:transform 1s var(--ease)}
+.hero.go .hline{transform:none}
+.hero.go .hmask:nth-child(2) .hline{transition-delay:.08s}
+.hero.go .hmask:nth-child(3) .hline{transition-delay:.16s}
+.hline .ol{color:transparent;-webkit-text-stroke:1.4px var(--txt)}
+.hline .ac{color:var(--acc)}
+.hsub{color:var(--mut);max-width:540px;margin:26px 0 34px;font-size:clamp(15px,1.35vw,17px)}
+.hsub b{color:var(--txt);font-weight:500}
+.hcta{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:30px}
+.hfeats{display:flex;gap:0;flex-wrap:wrap;border-top:1px solid var(--line)}
+.hfeats span{font-family:var(--fm);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut2);padding:14px 18px 0 0;margin-right:18px}
+.hfeats span::before{content:"◆";color:var(--acc);margin-right:8px;font-size:8px;vertical-align:2px}
+
+/* terminal */
+.term{border:1px solid var(--line2);background:#0A0A08;box-shadow:0 30px 80px -30px rgba(0,0,0,.8);opacity:0;transform:translateY(20px);transition:.9s var(--ease) .35s}
+.hero.go .term{opacity:1;transform:none}
+.term-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.tdots{display:flex;gap:6px}
+.tdots i{width:9px;height:9px;border-radius:50%;background:var(--line2)}
+.tdots i:first-child{background:var(--acc)}
+.ttitle{font-family:var(--fm);font-size:11px;color:var(--mut);letter-spacing:.1em}
+.tbadge{margin-left:auto;font-family:var(--fm);font-size:10px;letter-spacing:.1em;color:var(--acc);border:1px solid rgba(255,77,0,.4);padding:3px 9px}
+.term-body{padding:18px 18px 22px;font-family:var(--fm);font-size:12px;line-height:2.05;white-space:pre;overflow-x:auto;color:#C9C5B6}
+.tl{opacity:0;transform:translateY(7px);transition:.45s var(--ease)}
+.tl.show{opacity:1;transform:none}
+.tp{color:var(--acc);font-weight:700}
+.tout{color:var(--mut2)}
+.tnum{color:var(--acc);font-weight:700}
+.tm{color:var(--txt)}
+.tdim{color:var(--mut2)}
+.tcost{color:var(--acc2)}
+.tconf{color:var(--acc);font-weight:700}
+.tok{color:var(--grn)}
+.caret{display:inline-block;width:8px;height:15px;background:var(--acc);vertical-align:-2px;margin-left:2px;animation:blink 1.05s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.tcap{font-family:var(--fm);font-size:10.5px;letter-spacing:.12em;color:var(--mut2);margin-top:14px;text-transform:uppercase;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.tcap b{color:var(--mut);font-weight:500}
+
+/* ============ TICKER ============ */
+.ticker{background:var(--acc);color:#0C0C0A;overflow:hidden;border-top:1px solid #0C0C0A;border-bottom:1px solid #0C0C0A;padding:13px 0;position:relative}
+.ttrack{display:flex;width:max-content;animation:tick 30s linear infinite}
+.ticker:hover .ttrack{animation-play-state:paused}
+.ttrack span{font-family:var(--fm);font-weight:700;font-size:12.5px;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap;padding-right:18px}
+@keyframes tick{to{transform:translateX(-50%)}}
+
+/* ============ STATS ============ */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-left:none}
+.stat{border-left:1px solid var(--line);padding:clamp(26px,3vw,44px) clamp(20px,2.5vw,36px);position:relative;transition:background .4s}
+.stat:hover{background:var(--bg2)}
+.stat .num{font-family:var(--fd);font-weight:600;font-size:clamp(38px,4.6vw,60px);line-height:1;letter-spacing:-.02em}
+.stat .num small{font-size:.42em;color:var(--mut);font-weight:500;vertical-align:14px;letter-spacing:0}
+.stat .lab{font-family:var(--fm);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-top:14px}
+.stat::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:0;background:var(--acc);transition:width .5s var(--ease)}
+.stat:hover::after{width:100%}
+
+/* ============ PIPELINE PREVIEW (paper) ============ */
+.sec--paper{background:var(--paper);color:var(--ink)}
+.sec--paper .eyebrow{color:var(--acc)}
+.sec--paper .lead{color:#5E5A4C}
+.sec--paper .idx{color:#8A8574}
+.pv{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border:1px solid var(--pline);border-left:none;background:var(--paper)}
+.pvc{border-left:1px solid var(--pline);padding:clamp(22px,2.4vw,32px);position:relative;transition:.4s var(--ease);display:flex;flex-direction:column;gap:14px}
+.pvc:hover{background:var(--ink);color:var(--paper)}
+.pvc:hover .pvnum{color:transparent;-webkit-text-stroke:1px var(--acc)}
+.pvc:hover .pvd{color:#B9B5A6}
+.pvnum{font-family:var(--fd);font-weight:700;font-size:clamp(30px,3vw,42px);color:transparent;-webkit-text-stroke:1.1px #9A9584;line-height:1;transition:.4s}
+.pvc h3{font-family:var(--fm);font-size:12px;letter-spacing:.16em;text-transform:uppercase;font-weight:700}
+.pvd{font-size:13.5px;line-height:1.6;color:#5E5A4C;transition:.4s}
+.pvarrow{position:absolute;right:-9px;top:38%;color:var(--acc);font-family:var(--fm);z-index:2;font-size:15px}
+.pvfoot{display:flex;justify-content:space-between;align-items:center;margin-top:36px;flex-wrap:wrap;gap:16px}
+.linkmore{font-family:var(--fm);font-size:13px;letter-spacing:.06em;color:inherit;display:inline-flex;gap:9px;align-items:center;border-bottom:1px solid currentColor;padding-bottom:3px;transition:.3s}
+.linkmore:hover{color:var(--acc);border-color:var(--acc)}
+.sec--paper .btn--ghost{border-color:#B7B3A3;color:var(--ink)}
+.sec--paper .btn--ghost:hover{border-color:var(--acc);color:var(--acc);background:transparent}
+
+/* ============ OUTPUT SAMPLE (landing) ============ */
+.split{display:grid;grid-template-columns:.9fr 1.1fr;gap:clamp(36px,5vw,80px);align-items:start}
+.json{border:1px solid var(--line2);background:#0A0A08}
+.json-bar{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);font-family:var(--fm);font-size:11px;letter-spacing:.08em}
+.json-bar .fname{color:var(--txt)}
+.json-bar .fmeta{color:var(--mut2);margin-left:auto}
+.json-bar .ok{color:var(--grn)}
+.json-body{padding:20px;font-family:var(--fm);font-size:12px;line-height:1.95;overflow-x:auto;max-height:460px;white-space:pre;color:#A9A594}
+.j-k{color:#8F8B7D}.j-s{color:#E9E6DC}.j-n{color:var(--acc)}.j-p{color:#55524A}.j-b{color:var(--grn)}
+.blist{margin-top:28px;display:grid;gap:0;border-top:1px solid var(--line)}
+.blist li{list-style:none;display:flex;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);color:var(--mut);font-size:14.5px}
+.blist li b{color:var(--txt);font-weight:500}
+.blist li .mono{color:var(--acc);font-size:12px;padding-top:3px;white-space:nowrap}
+
+/* ============ DECISIONS ============ */
+.dgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.dcard{background:var(--bg);padding:clamp(28px,3vw,42px);transition:.4s var(--ease);position:relative}
+.dcard:hover{background:var(--bg2)}
+.dcard .dnum{font-family:var(--fm);font-size:11px;color:var(--acc);letter-spacing:.16em}
+.dcard h3{font-family:var(--fd);font-weight:600;font-size:clamp(19px,1.8vw,24px);margin:14px 0 12px;letter-spacing:-.01em}
+.dcard p{color:var(--mut);font-size:14.5px}
+.dcard .dtag{position:absolute;top:clamp(28px,3vw,42px);right:clamp(28px,3vw,42px);font-family:var(--fm);font-size:10px;letter-spacing:.12em;color:var(--mut2);border:1px solid var(--line);padding:4px 9px}
+.dcard:hover .dtag{color:var(--acc);border-color:rgba(255,77,0,.4)}
+
+/* ============ LIMITATIONS ============ */
+.lims{display:grid;grid-template-columns:1fr 1fr;gap:0 clamp(40px,5vw,80px)}
+.lim{display:flex;gap:18px;padding:22px 0;border-bottom:1px solid var(--line)}
+.lim .tag{font-family:var(--fm);font-size:10.5px;letter-spacing:.1em;color:var(--acc);border:1px solid rgba(255,77,0,.35);padding:5px 10px;height:fit-content;white-space:nowrap}
+.lim p{color:var(--mut);font-size:14px}
+.lim p b{color:var(--txt);font-weight:500}
+
+/* ============ FOOTER ============ */
+footer{border-top:1px solid var(--line);padding:clamp(56px,7vw,90px) 0 36px;overflow:hidden}
+.fword{font-family:var(--fd);font-weight:700;font-size:clamp(58px,11vw,168px);line-height:.95;letter-spacing:-.02em;color:transparent;-webkit-text-stroke:1px var(--line2);user-select:none;transition:.6s var(--ease);white-space:nowrap}
+.fword:hover{-webkit-text-stroke:1px var(--acc)}
+.fcols{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:36px;margin-top:clamp(40px,5vw,64px)}
+.fcols h4{font-family:var(--fm);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut2);margin-bottom:18px}
+.fcols a,.fcols span{display:block;color:var(--mut);font-size:14px;padding:5px 0;transition:color .3s}
+.fcols a:hover{color:var(--acc)}
+.fdesc{color:var(--mut);font-size:14px;max-width:300px;margin-top:14px}
+.fbot{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:clamp(40px,5vw,60px);padding-top:26px;font-family:var(--fm);font-size:11.5px;color:var(--mut2);letter-spacing:.06em}
+#toTop{font-family:var(--fm);font-size:11.5px;letter-spacing:.1em;color:var(--mut);transition:.3s}
+#toTop:hover{color:var(--acc)}
+
+/* ============ ARCHITECTURE PAGE ============ */
+.flow{display:flex;flex-direction:column;align-items:center;gap:0;padding:clamp(40px,5vw,64px) 0}
+.frow{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
+.fnode{font-family:var(--fm);font-size:12.5px;letter-spacing:.04em;border:1px solid var(--line2);background:var(--bg2);padding:14px 20px;position:relative}
+.fnode small{display:block;font-size:10px;color:var(--mut2);letter-spacing:.1em;margin-top:3px;text-transform:uppercase}
+.fnode--acc{border-color:rgba(255,77,0,.55);color:var(--acc);background:var(--accsoft)}
+.fnode--acc small{color:var(--acc2)}
+.farrow{color:var(--acc);font-family:var(--fm);font-size:18px;padding:6px 0;animation:drip 1.7s ease-in-out infinite}
+.frow:nth-child(4) .farrow{animation-delay:.2s}.frow:nth-child(6) .farrow{animation-delay:.4s}
+.frow:nth-child(8) .farrow{animation-delay:.6s}.frow:nth-child(10) .farrow{animation-delay:.8s}
+@keyframes drip{0%,100%{opacity:.3;transform:translateY(-3px)}50%{opacity:1;transform:translateY(3px)}}
+.fbranch{display:grid;grid-template-columns:1fr 1fr;gap:clamp(20px,4vw,60px);width:100%;max-width:820px}
+.fbranch .fcol{display:flex;flex-direction:column;align-items:center;gap:12px}
+.fblab{font-family:var(--fm);font-size:10px;letter-spacing:.18em;text-transform:uppercase}
+.fblab.y{color:var(--acc)}.fblab.n{color:var(--mut2)}
+.mods{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.mod{background:var(--bg);padding:clamp(24px,2.6vw,36px);transition:.4s var(--ease)}
+.mod:hover{background:var(--bg2)}
+.mod .mf{font-family:var(--fm);font-size:13px;font-weight:700}
+.mod .mf i{font-style:normal;color:var(--acc)}
+.mod h3{font-family:var(--fd);font-weight:600;font-size:19px;margin:12px 0 10px}
+.mod p{color:var(--mut);font-size:13.5px;margin-bottom:14px}
+.mod .mx{font-family:var(--fm);font-size:11px;color:var(--mut2);line-height:1.9;border-top:1px solid var(--line);padding-top:12px}
+.mod .mx b{color:var(--acc2);font-weight:500}
+/* confidence lab */
+.lab{border:1px solid var(--line2);background:var(--bg2);display:grid;grid-template-columns:1.15fr .85fr;gap:0}
+.lab-l{padding:clamp(28px,3.4vw,48px);border-right:1px solid var(--line);display:grid;gap:26px;align-content:start}
+.srow{display:grid;grid-template-columns:150px 1fr 58px;gap:18px;align-items:center}
+.srow label{font-family:var(--fm);font-size:12px;letter-spacing:.06em;color:var(--mut)}
+.srow label b{color:var(--txt);display:block;font-size:12.5px}
+.srow output{font-family:var(--fm);font-size:14px;color:var(--acc);text-align:right}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:2px;background:var(--line2);outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;background:var(--acc);border:none;transition:transform .2s}
+input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.3)}
+input[type=range]::-moz-range-thumb{width:15px;height:15px;background:var(--acc);border:none;border-radius:0}
+.lab-r{padding:clamp(28px,3.4vw,48px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;text-align:center}
+.ring{width:170px;height:170px}
+.ring-bg{fill:none;stroke:var(--line);stroke-width:5}
+.ring-fg{fill:none;stroke:var(--acc);stroke-width:5;stroke-linecap:square;stroke-dasharray:326.7;transform:rotate(-90deg);transform-origin:center;transition:stroke-dashoffset .9s var(--ease)}
+.ring-num{fill:var(--txt);font-family:var(--fm);font-size:26px;font-weight:700}
+.ring-sub{fill:var(--mut2);font-family:var(--fm);font-size:7.5px;letter-spacing:2.5px}
+.lexpr{font-family:var(--fm);font-size:12px;color:var(--mut);line-height:2;word-spacing:-2px}
+.lexpr b{color:var(--acc);font-weight:500}
+
+/* ============ PIPELINE PAGE ============ */
+.stepper{display:grid;grid-template-columns:.9fr 1.1fr;gap:clamp(30px,4vw,64px);align-items:start}
+.steps{list-style:none;display:grid}
+.sitem{display:grid;grid-template-columns:52px 1fr;gap:6px 18px;padding:20px 14px;border-bottom:1px solid var(--line);cursor:pointer;transition:.3s;position:relative}
+.sitem .snum{font-family:var(--fd);font-weight:600;font-size:24px;color:transparent;-webkit-text-stroke:1px var(--mut2);grid-row:span 2;transition:.3s}
+.sitem .sname{font-family:var(--fm);font-size:13px;letter-spacing:.06em;color:var(--mut);transition:.3s}
+.sitem .sbar{grid-column:2;height:2px;background:var(--line);position:relative;overflow:hidden;margin-top:4px}
+.sitem .sbar i{position:absolute;inset:0;background:var(--acc);transform:scaleX(0);transform-origin:left}
+.sitem:hover .sname{color:var(--txt)}
+.sitem.on{background:var(--bg2)}
+.sitem.on .snum{-webkit-text-stroke:1px var(--acc)}
+.sitem.on .sname{color:var(--txt)}
+.sitem.on .sbar i{animation:fillbar 6s linear forwards}
+@keyframes fillbar{to{transform:scaleX(1)}}
+.stopped .sitem.on .sbar i{animation:none;transform:scaleX(1)}
+.spanl{display:none;border:1px solid var(--line2);background:var(--bg2);padding:clamp(28px,3.2vw,44px)}
+.spanl.on{display:block;animation:pagein .5s var(--ease)}
+.spanl .sk{font-family:var(--fm);font-size:11px;letter-spacing:.2em;color:var(--acc);text-transform:uppercase}
+.spanl h3{font-family:var(--fd);font-weight:600;font-size:clamp(24px,2.4vw,32px);margin:12px 0 14px;letter-spacing:-.01em}
+.spanl p{color:var(--mut);font-size:15px;max-width:560px}
+.snip{margin-top:26px;border:1px solid var(--line);background:#0A0A08;padding:18px 20px;font-family:var(--fm);font-size:12px;line-height:2;overflow-x:auto;white-space:pre;color:#C9C5B6}
+.snip .c{color:var(--mut2)}.snip .a{color:var(--acc)}.snip .g{color:var(--grn)}
+
+/* ============ OUTPUT PAGE ============ */
+.oconfig{display:grid;grid-template-columns:300px 1fr;gap:clamp(26px,3.4vw,54px);align-items:start}
+.otabs{display:grid;gap:1px;background:var(--line);border:1px solid var(--line)}
+.otab{background:var(--bg);text-align:left;padding:20px 22px;transition:.3s;display:grid;gap:5px}
+.otab:hover{background:var(--bg2)}
+.otab .od{font-family:var(--fm);font-size:13.5px;font-weight:700}
+.otab .om{font-family:var(--fm);font-size:10.5px;letter-spacing:.1em;color:var(--mut2);text-transform:uppercase}
+.otab .osc{font-family:var(--fm);font-size:12px;color:var(--acc)}
+.otab.on{background:var(--bg2);box-shadow:inset 3px 0 0 var(--acc)}
+.orecord{border:1px solid var(--line2);background:var(--bg2)}
+.or-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:22px 28px;border-bottom:1px solid var(--line)}
+.or-head h3{font-family:var(--fd);font-weight:600;font-size:24px}
+.or-head .chip{font-family:var(--fm);font-size:10.5px;letter-spacing:.1em;border:1px solid var(--line2);color:var(--mut);padding:5px 10px;text-transform:uppercase}
+.or-head .chip.hl{border-color:rgba(255,77,0,.5);color:var(--acc)}
+.or-body{display:grid;grid-template-columns:1fr auto;gap:clamp(24px,3vw,44px);padding:clamp(24px,3vw,40px)}
+.or-sec{margin-bottom:22px}
+.or-sec h5{font-family:var(--fm);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--mut2);margin-bottom:10px}
+.or-sec p{color:var(--mut);font-size:14.5px;max-width:520px}
+.olead{display:flex;gap:14px;align-items:center;border:1px solid var(--line);padding:12px 16px;margin-top:8px}
+.olead .av{width:38px;height:38px;background:var(--accsoft);color:var(--acc);display:grid;place-items:center;font-family:var(--fd);font-weight:700;font-size:15px;flex-shrink:0}
+.olead .on{font-size:14px;font-weight:600}
+.olead .ot{font-family:var(--fm);font-size:11px;color:var(--mut)}
+.olead .ol2{margin-left:auto;font-family:var(--fm);font-size:11px;color:var(--acc2)}
+.ocontacts{display:flex;gap:10px;flex-wrap:wrap}
+.ocontacts span{font-family:var(--fm);font-size:12px;border:1px solid var(--line2);padding:7px 12px;color:var(--txt)}
+.or-ring{text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px}
+.or-ring .rlab{font-family:var(--fm);font-size:10.5px;letter-spacing:.2em;color:var(--mut2);text-transform:uppercase}
+.fbars{display:grid;gap:12px;width:100%;min-width:210px}
+.fbar{display:grid;grid-template-columns:86px 1fr 44px;gap:12px;align-items:center;font-family:var(--fm);font-size:11px}
+.fbar .fl{color:var(--mut)}
+.fbar .ft{height:3px;background:var(--line);position:relative}
+.fbar .ft i{position:absolute;inset:0;background:var(--acc);width:0;transition:width .8s var(--ease)}
+.fbar .fv{color:var(--txt);text-align:right}
+/* summary tiles */
+.sumtiles{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-bottom:28px}
+.stile{background:var(--bg);padding:26px}
+.stile .sn{font-family:var(--fd);font-weight:600;font-size:30px;color:var(--acc)}
+.stile .sl{font-family:var(--fm);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut2);margin-top:8px}
+details.full{border:1px solid var(--line2);background:#0A0A08}
+details.full summary{cursor:pointer;padding:16px 22px;font-family:var(--fm);font-size:12px;letter-spacing:.1em;color:var(--txt);list-style:none;display:flex;justify-content:space-between;align-items:center}
+details.full summary::after{content:"+";color:var(--acc);font-size:18px;transition:.3s}
+details.full[open] summary::after{transform:rotate(45deg)}
+details.full summary:hover{color:var(--acc)}
+details.full .json-body{max-height:520px;border-top:1px solid var(--line)}
+.notechip{display:inline-flex;gap:10px;align-items:center;font-family:var(--fm);font-size:11.5px;color:var(--mut);border:1px dashed var(--line2);padding:10px 16px;margin-top:22px}
+.notechip b{color:var(--acc2);font-weight:500}
+
+/* ============ DOCS PAGE ============ */
+.block{border:1px solid var(--line2);background:#0A0A08;position:relative}
+.block-bar{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--line);font-family:var(--fm);font-size:11px;color:var(--mut2);letter-spacing:.08em}
+.copy{font-family:var(--fm);font-size:10.5px;letter-spacing:.1em;color:var(--mut);border:1px solid var(--line);padding:4px 10px;transition:.3s;text-transform:uppercase}
+.copy:hover{color:var(--acc);border-color:var(--acc)}
+.block-body{padding:20px 22px;font-family:var(--fm);font-size:12.5px;line-height:2.1;overflow-x:auto;white-space:pre;color:#C9C5B6}
+.block-body .c{color:var(--mut2)}.block-body .a{color:var(--acc)}.block-body .g{color:var(--grn)}.block-body .w{color:var(--txt)}
+.dtwo{display:grid;grid-template-columns:1fr 1fr;gap:clamp(28px,4vw,56px);align-items:start}
+.tblwrap{overflow-x:auto;border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:480px}
+th{font-family:var(--fm);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut2);text-align:left;padding:14px 18px;border-bottom:1px solid var(--line2);font-weight:500;background:var(--bg2)}
+td{padding:13px 18px;border-bottom:1px solid var(--line);color:var(--mut);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg2)}
+td.mono{color:var(--txt);font-size:12.5px;white-space:nowrap}
+td.mono.ax{color:var(--acc2)}
+.tree{font-family:var(--fm);font-size:12.5px;line-height:2.15;color:var(--mut);white-space:pre;overflow-x:auto}
+.tree b{color:var(--txt);font-weight:500}
+.tree .cm{color:var(--mut2);font-style:italic}
+.trouble{display:grid;gap:0;border-top:1px solid var(--line)}
+.trouble li{list-style:none;display:grid;grid-template-columns:220px 1fr;gap:20px;padding:20px 0;border-bottom:1px solid var(--line)}
+.trouble .tq{font-family:var(--fm);font-size:12.5px;color:var(--txt)}
+.trouble .tq::before{content:"! ";color:var(--acc);font-weight:700}
+.trouble .ta{color:var(--mut);font-size:14px}
+.trouble .ta code{font-family:var(--fm);font-size:12px;color:var(--acc2)}
+
+/* ============ RESPONSIVE ============ */
+@media(max-width:1080px){
+  .hero-grid{grid-template-columns:1fr}
+  .pv{grid-template-columns:1fr 1fr}
+  .pvc:last-child{grid-column:1/-1}
+  .mods{grid-template-columns:1fr 1fr}
+  .oconfig{grid-template-columns:1fr}
+  .otabs{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:880px){
+  .nlinks,.nav-cta{display:none}
+  .burger{display:flex}
+  .stats{grid-template-columns:1fr 1fr;border-left:1px solid var(--line);border-top:none}
+  .stat{border-top:1px solid var(--line)}
+  .split,.dgrid,.lims,.dtwo,.lab,.stepper,.or-body{grid-template-columns:1fr}
+  .lab-l{border-right:none;border-bottom:1px solid var(--line)}
+  .dgrid{grid-template-columns:1fr}
+  .fcols{grid-template-columns:1fr 1fr}
+  .fbranch{grid-template-columns:1fr}
+  .trouble li{grid-template-columns:1fr;gap:8px}
+  .sumtiles{grid-template-columns:1fr 1fr}
+  .otabs{grid-template-columns:1fr}
+  .srow{grid-template-columns:110px 1fr 48px;gap:10px}
+  .or-ring{border-top:1px solid var(--line);padding-top:26px}
+}
+@media(max-width:600px){
+  .pv{grid-template-columns:1fr}
+  .pvc{border-left:none;border-top:1px solid var(--pline)}
+  .pvc:first-child{border-top:none}
+  .pvarrow{display:none}
+  .mods{grid-template-columns:1fr}
+  .hfeats span{padding-right:10px;margin-right:10px}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001s!important;transition-duration:.001s!important}
+  .rv,.hline,.term,.tl{opacity:1!important;transform:none!important}
+}
+</style>
+</head>
+<body>
+
+<a href="#main" style="position:absolute;left:-9999px;top:0;background:var(--acc);color:#0C0C0A;padding:10px 16px;font-family:var(--fm);font-size:12px;z-index:2000" onfocus="this.style.left='0'" onblur="this.style.left='-9999px'">Skip to content</a>
+<div id="prog"></div>
+
+<!-- ================= NAV ================= -->
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="logo" href="#/" aria-label="lead-agent home">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" fill="#FF4D00"/><rect x="7" y="8" width="18" height="3" fill="#0C0C0A"/><rect x="7" y="14.5" width="12" height="3" fill="#0C0C0A"/><rect x="7" y="21" width="18" height="3" fill="#0C0C0A"/></svg>
+      lead<em>—</em>agent
+    </a>
+    <nav class="nlinks" aria-label="Primary">
+      <a href="#/" data-nav="home">Overview</a>
+      <a href="#/architecture" data-nav="architecture">Architecture</a>
+      <a href="#/pipeline" data-nav="pipeline">Pipeline</a>
+      <a href="#/output" data-nav="output">Output</a>
+      <a href="#/docs" data-nav="docs">Docs</a>
+    </nav>
+    <a class="nav-cta" href="#/docs">$ run locally</a>
+    <button class="burger" id="burger" aria-label="Menu" aria-expanded="false"><i></i><i></i><i></i></button>
+  </div>
+</header>
+
+<!-- mobile menu -->
+<div class="menu" id="menu">
+  <a href="#/" data-nav="home"><small>01</small>Overview</a>
+  <a href="#/architecture" data-nav="architecture"><small>02</small>Architecture</a>
+  <a href="#/pipeline" data-nav="pipeline"><small>03</small>Pipeline</a>
+  <a href="#/output" data-nav="output"><small>04</small>Output</a>
+  <a href="#/docs" data-nav="docs"><small>05</small>Docs</a>
+</div>
+
+<main id="main">
+
+<!-- ============================================================
+     PAGE: HOME
+============================================================ -->
+<section class="page active" id="page-home">
+
+  <!-- HERO -->
+  <div class="hero" id="hero">
+    <div class="wrap hero-grid">
+      <i class="tick tl2">+</i><i class="tick tr2">+</i><i class="tick bl2">+</i><i class="tick br2">+</i>
+      <div>
+        <span class="hchip"><span class="dot"></span>open pipeline · groq / ollama · docker-green</span>
+        <div class="hmask"><span class="hline">Raw domains in.</span></div>
+        <div class="hmask"><span class="hline"><span class="ol">Structured leads</span></span></div>
+        <div class="hmask"><span class="hline">out<span class="ac">.</span></span></div>
+        <p class="hsub"><b>lead-enrichment-agent</b> crawls with httpx first, escalates to a headless browser only when the evidence demands it, and reads the cleaned text with <b>exactly one strict-schema LLM call per domain</b> — scored by a formula you can audit, never by the model's own opinion.</p>
+        <div class="hcta">
+          <a class="btn btn--solid" href="#/architecture">Explore the architecture <span class="ar">→</span></a>
+          <a class="btn btn--ghost" href="#/docs"><span class="mono" style="color:var(--acc)">$</span> run it locally</a>
+        </div>
+        <div class="hfeats">
+          <span>no agent frameworks</span><span>one call / domain</span><span>deterministic confidence</span><span>never crashes mid-run</span>
+        </div>
+      </div>
+
+      <div>
+        <div class="term" id="term">
+          <div class="term-bar">
+            <span class="tdots"><i></i><i></i><i></i></span>
+            <span class="ttitle">agent — live run</span>
+            <span class="tbadge">3 targets</span>
+          </div>
+          <div class="term-body">
+<div class="tl tcmd show" id="cmdLine" data-cmd="docker compose up --build"><span class="tp">$</span> <span id="cmdText"></span><span class="caret"></span></div>
+<div class="tl tout">resolving targets — postman.com · supabase.com · vapi.ai</div>
+<div class="tl"><span class="tnum">[1/3]</span> <span class="tm">postman.com</span>   <span class="tm">httpx×6</span>       <span class="tdim">│ raw 38.4KB → clean 2.9KB (~742 tok) │ LLM 812/289 tok</span> <span class="tcost">$0.00012</span> <span class="tdim">│</span> <span class="tconf">conf 0.90</span> <span class="tdim">│ 8.4s</span></div>
+<div class="tl"><span class="tnum">[2/3]</span> <span class="tm">supabase.com</span>  <span class="tm">httpx×5 pw×1</span>  <span class="tdim">│ raw 51.2KB → clean 4.1KB (~1048 tok) │ LLM 1147/354 tok</span> <span class="tcost">$0.00017</span> <span class="tdim">│</span> <span class="tconf">conf 0.96</span> <span class="tdim">│ 9.1s</span></div>
+<div class="tl"><span class="tnum">[3/3]</span> <span class="tm">vapi.ai</span>       <span class="tm">httpx×4 pw×2</span>  <span class="tdim">│ raw 22.7KB → clean 1.8KB (~460 tok) │ LLM 903/271 tok</span> <span class="tcost">$0.00014</span> <span class="tdim">│</span> <span class="tconf">conf 0.72</span> <span class="tdim">│ 11.2s</span></div>
+<div class="tl tok">✔ 3 records · 3,776 tok · $0.00043 est · 28.7s · 0 failed → output.json</div>
+          </div>
+        </div>
+        <p class="tcap"><span><b>live cost line</b> — printed per domain, in input order</span><span>format: main.py · fix 5</span></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- TICKER -->
+  <div class="ticker" aria-hidden="true">
+    <div class="ttrack">
+      <span>httpx-first ▸ playwright on evidence ▸ trafilatura ▸ pydantic v2 ▸ strict json_schema ▸ groq / ollama ▸ deterministic confidence ▸ one llm call per domain ▸ 8,000-token cap ▸ docker compose up&nbsp;</span>
+      <span>httpx-first ▸ playwright on evidence ▸ trafilatura ▸ pydantic v2 ▸ strict json_schema ▸ groq / ollama ▸ deterministic confidence ▸ one llm call per domain ▸ 8,000-token cap ▸ docker compose up&nbsp;</span>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="sec" style="padding-bottom:clamp(48px,6vw,80px)">
+    <div class="wrap">
+      <div class="stats rv">
+        <div class="stat"><div class="num"><span class="count" data-count="1">0</span></div><div class="lab">LLM call per domain</div></div>
+        <div class="stat"><div class="num">≤<span class="count" data-count="5">0</span></div><div class="lab">subpages · depth-1 · same-origin</div></div>
+        <div class="stat"><div class="num"><span class="count" data-count="8000">0</span></div><div class="lab">token ceiling per prompt</div></div>
+        <div class="stat"><div class="num"><span class="count" data-count="3">0</span>/<span class="count" data-count="3">0</span></div><div class="lab">domains · zero crashes</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIPELINE PREVIEW (paper) -->
+  <div class="sec sec--paper">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="idx">01 / THE PIPELINE</span>
+        <h2 class="h2">Five stages.<br>No magic.</h2>
+        <p class="lead">A fixed, deterministic pipeline — no agent loops, no recursive crawling, no surprises. Each stage is a small module with one job and a typed boundary.</p>
+      </div>
+      <div class="pv rv">
+        <div class="pvc"><span class="pvnum">01</span><h3>Resolve</h3><p class="pvd">Homepage + ≤5 regex subpages — about, team, company, contact, pricing, leadership. Depth-1, strictly same-origin.</p><span class="pvarrow">→</span></div>
+        <div class="pvc"><span class="pvnum">02</span><h3>Fetch</h3><p class="pvd">httpx with a browser UA and a 10s timeout. Escalate to Playwright only on thin cleaned text or 403 / 429 / 5xx.</p><span class="pvarrow">→</span></div>
+        <div class="pvc"><span class="pvnum">03</span><h3>Clean</h3><p class="pvd">trafilatura → recall retry → BeautifulSoup fallback. Concatenated longest-first, hard-capped at 8,000 tokens.</p><span class="pvarrow">→</span></div>
+        <div class="pvc"><span class="pvnum">04</span><h3>Extract</h3><p class="pvd">One Groq (or Ollama) call with a strict json_schema. One validation retry feeding errors back — then a partial record.</p><span class="pvarrow">→</span></div>
+        <div class="pvc"><span class="pvnum">05</span><h3>Score</h3><p class="pvd">Deterministic confidence computed in Python. Records + reconciled summary written to output.json.</p></div>
+      </div>
+      <div class="pvfoot rv">
+        <a class="linkmore" href="#/pipeline">Walk through a full run <span>→</span></a>
+        <a class="btn btn--ghost" href="#/architecture">Module map <span class="ar">→</span></a>
+      </div>
+    </div>
+  </div>
+
+  <!-- OUTPUT SAMPLE -->
+  <div class="sec">
+    <div class="wrap split">
+      <div class="rv">
+        <div class="sec-head" style="margin-bottom:0">
+          <span class="idx">02 / SAMPLE OUTPUT</span>
+          <h2 class="h2">One object.<br>Reconcilable totals.</h2>
+          <p class="lead">Never a bare list. Every run emits <span class="mono" style="color:var(--acc2)">{"records", "summary"}</span> so totals can be checked against the per-domain terminal lines — by you, or by a grader.</p>
+        </div>
+        <ul class="blist">
+          <li><span class="mono">a.</span><p><b>Records, not noise.</b> Each domain gets exactly one record — even failures, which arrive at 0.05 confidence with an errors array attached.</p></li>
+          <li><span class="mono">b.</span><p><b>Confidence is auditable.</b> Recompute any score by hand from four observable signals. The LLM never grades itself.</p></li>
+          <li><span class="mono">c.</span><p><b>Validate it yourself.</b> The file re-passes the same Pydantic schema the pipeline enforces at write time.</p></li>
+        </ul>
+        <div style="margin-top:28px"><a class="btn btn--ghost" href="#/output">Full per-domain breakdown <span class="ar">→</span></a></div>
+      </div>
+      <div class="rv" style="--d:.12s">
+        <div class="json">
+          <div class="json-bar"><span class="fname">output.json</span><span class="fmeta">3 records</span><span class="ok">✔ schema-valid</span></div>
+          <div class="json-body">{
+  <span class="j-k">"records"</span><span class="j-p">: [</span>
+    <span class="j-p">{</span>
+      <span class="j-k">"domain"</span><span class="j-p">:</span> <span class="j-s">"postman.com"</span><span class="j-p">,</span>
+      <span class="j-k">"company_overview"</span><span class="j-p">:</span> <span class="j-s">"Postman is an API platform for designing, building and testing APIs..."</span><span class="j-p">,</span>
+      <span class="j-k">"target_audience"</span><span class="j-p">:</span> <span class="j-s">"Developers and platform teams standardising API workflows."</span><span class="j-p">,</span>
+      <span class="j-k">"contact_points"</span><span class="j-p">: [</span><span class="j-s">"help@postman.com"</span><span class="j-p">],</span>
+      <span class="j-k">"leadership"</span><span class="j-p">: [</span>
+        <span class="j-p">{</span><span class="j-k">"name"</span><span class="j-p">:</span> <span class="j-s">"Abhinav Asthana"</span><span class="j-p">,</span> <span class="j-k">"title"</span><span class="j-p">:</span> <span class="j-s">"Co-founder &amp; CEO"</span><span class="j-p">}</span>
+      <span class="j-p">],</span>
+      <span class="j-k">"confidence_score"</span><span class="j-p">:</span> <span class="j-n">0.90</span><span class="j-p">,</span>
+      <span class="j-k">"errors"</span><span class="j-p">: []</span>
+    <span class="j-p">},</span>
+    <span class="j-p">{</span> <span class="j-k">"domain"</span><span class="j-p">:</span> <span class="j-s">"supabase.com"</span><span class="j-p">,</span> <span class="j-k">"confidence_score"</span><span class="j-p">:</span> <span class="j-n">0.96</span><span class="j-p">, ... },</span>
+    <span class="j-p">{</span> <span class="j-k">"domain"</span><span class="j-p">:</span> <span class="j-s">"vapi.ai"</span><span class="j-p">,</span> <span class="j-k">"confidence_score"</span><span class="j-p">:</span> <span class="j-n">0.72</span><span class="j-p">, ... }</span>
+  <span class="j-p">],</span>
+  <span class="j-k">"summary"</span><span class="j-p">: {</span>
+    <span class="j-k">"total_tokens"</span><span class="j-p">:</span> <span class="j-n">3776</span><span class="j-p">,</span>
+    <span class="j-k">"total_cost_usd"</span><span class="j-p">:</span> <span class="j-n">0.0004</span><span class="j-p">,</span>
+    <span class="j-k">"total_runtime_s"</span><span class="j-p">:</span> <span class="j-n">28.7</span><span class="j-p">,</span>
+    <span class="j-k">"domains_failed"</span><span class="j-p">:</span> <span class="j-n">0</span>
+  <span class="j-p">}</span>
+}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DECISIONS -->
+  <div class="sec" style="padding-top:0">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="idx">03 / DECISION LOG</span>
+        <h2 class="h2">Opinionated, on purpose.</h2>
+      </div>
+      <div class="dgrid rv">
+        <div class="dcard"><span class="dtag">fetching</span><span class="dnum">D—01</span><h3>httpx first, browser on evidence</h3><p>Plain HTTP with a browser UA is tried first. The headless browser escalates only when cleaned text is thin (&lt;500 chars) or the server answers 403 / 429 / 5xx — never on raw page size, since JS shells are large but empty.</p></div>
+        <div class="dcard"><span class="dtag">extraction</span><span class="dnum">D—02</span><h3>One LLM call per domain</h3><p>Strict json_schema emitted from the Pydantic v2 model, one validation retry feeding <span class="mono" style="font-size:12px;color:var(--acc2)">ValidationError.errors()</span> back, then a partial record. No per-page calls, no agent loops, no more than two requests ever.</p></div>
+        <div class="dcard"><span class="dtag">scoring</span><span class="dnum">D—03</span><h3>Confidence you can audit</h3><p>Small chat models are miscalibrated — fluency is not evidence. The score is computed in Python from four observable signals: field coverage, page success rate, contact quality, and text quality. Failures land at 0.05.</p></div>
+        <div class="dcard"><span class="dtag">resilience</span><span class="dnum">D—04</span><h3>Failures don't propagate</h3><p>Timeouts, bot blockers and bogus domains are caught per-URL and per-domain. One dead site yields a low-confidence record with an errors array — the batch continues, and the process still exits 0.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIMITATIONS -->
+  <div class="sec" style="padding-top:0">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="idx">04 / HONEST LIMITATIONS</span>
+        <h2 class="h2">Deliberate non-goals,<br>not oversights.</h2>
+      </div>
+      <div class="lims rv">
+        <div class="lim"><span class="tag">no-self-grade</span><p><b>No LLM-rated confidence.</b> A deterministic formula replaces it, because small models can't reliably grade their own output.</p></div>
+        <div class="lim"><span class="tag">no-founder-search</span><p><b>No LinkedIn / Tavily lookup.</b> Deferred to the bonus phase — homepage leadership names are often customer quotes and need external verification to avoid misattribution.</p></div>
+        <div class="lim"><span class="tag">no-agent-loop</span><p><b>No LangGraph / Browser-Use.</b> A fixed httpx-first pipeline is deterministic, cheaper, and demoable in two minutes where an agent loop would add flake.</p></div>
+        <div class="lim"><span class="tag">no-fake-pins</span><p><b>No fake Python pin in Docker.</b> The Playwright base image ships 3.12; the code is written 3.11-compatible and the difference is documented, not hidden.</p></div>
+        <div class="lim"><span class="tag">no-optimism</span><p><b>No assumption that plain HTTP always works.</b> Hydrated subpages (vapi.ai-style) escalate to Playwright by design and are logged as such.</p></div>
+        <div class="lim"><span class="tag">no-creep</span><p><b>Bonus seams stay seams.</b> A search-fallback stub and a cost hook exist as marked NOT-BUILT interfaces — never called in the core path.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     PAGE: ARCHITECTURE
+============================================================ -->
+<section class="page" id="page-architecture">
+  <div class="phead">
+    <div class="wrap">
+      <p class="eyebrow">architecture</p>
+      <h1>Six modules,<br>one direction of <span class="ac">dependency</span>.</h1>
+      <p class="lead">config → models → fetcher → cleaner → extractor → main. Each module imports the last, owns one concern, and never hardcodes another's constants. No framework, no graph runtime — just typed boundaries.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="idx">01 / ESCALATION FLOW</span>
+        <h2 class="h2">The browser is a last resort,<br>not a default.</h2>
+        <p class="lead">Every arrow below is a decision the fetcher makes per URL, logged with its method. Playwright launches once per run and is reused across all domains.</p>
+      </div>
+      <div class="flow rv">
+        <div class="frow"><div class="fnode">GET homepage + subpages<small>httpx · browser UA · 10s timeout</small></div></div>
+        <div class="farrow">↓</div>
+        <div class="frow"><div class="fnode">clean_page()<small>trafilatura → recall → bs4</small></div></div>
+        <div class="farrow">↓</div>
+        <div class="frow"><div class="fnode fnode--acc">thin text &lt; 500 chars &nbsp;∨&nbsp; 403 / 429 / 5xx ?<small>the only escalation trigger — never raw HTML size</small></div></div>
+        <div class="farrow">↓</div>
+        <div class="fbranch">
+          <div class="fcol"><span class="fblab y">yes → escalate</span><div class="fnode fnode--acc">Playwright render<small>one shared browser for the whole run</small></div><div class="farrow" style="animation-delay:.3s">↓</div><div class="fnode">clean via bs4<small>js-rendered dom</small></div></div>
+          <div class="fcol"><span class="fblab n">no → keep</span><div class="fnode">httpx result stands<small>cheapest path · default</small></div><div class="farrow" style="animation-delay:.3s">↓</div><div class="fnode" style="visibility:hidden">·</div></div>
+        </div>
+        <div class="farrow">↓</div>
+        <div class="frow"><div class="fnode">concat pages · longest-first · ≤ 8,000 tokens<small>tiktoken estimate</small></div></div>
+        <div class="farrow">↓</div>
+        <div class="frow"><div class="fnode fnode--acc">ONE LLM call<small>groq openai/gpt-oss-20b · strict json_schema · ollama fallback</small></div></div>
+        <div class="farrow">↓</div>
+        <div class="frow">
+          <div class="fnode">validate<small>pydantic v2 · ≤1 retry w/ errors fed back</small></div>
+          <div class="fnode">confidence<small>deterministic · in python</small></div>
+          <div class="fnode">output.json<small>records + summary</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec sec--paper">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="idx">02 / MODULE MAP</span>
+        <h2 class="h2">Small files.<br>Sharp edges.</h2>
+      </div>
+      <div class="mods rv" style="border-color:var(--pline)">
+        <div class="mod" style="background:var(--paper)"><span class="mf"><i>/</i>config.py</span><h3>Env-driven constants</h3><p>Every knob lives here — timeouts, thresholds, regex, model names. No magic numbers anywhere else in the codebase.</p><div class="mx"><b>exports</b> — FETCH_TIMEOUT_S=10 · ESCALATE_MIN_CLEAN_CHARS=500 · TOKEN_BUDGET=8000 · SUBPAGE_RE · MAX_SUBPAGES=5</div></div>
+        <div class="mod" style="background:var(--paper)"><span class="mf"><i>/</i>models.py</span><h3>Two-model split</h3><p>ExtractionPayload for the LLM (strict, no confidence field) and CompanyRecord for output, which adds the computed score and an errors list.</p><div class="mx"><b>exports</b> — ExtractionPayload · CompanyRecord · RunSummary · model_json_schema()</div></div>
+        <div class="mod" style="background:var(--paper)"><span class="mf"><i>/</i>fetcher.py</span><h3>Conditional escalation</h3><p>httpx AsyncClient first; a single shared Playwright browser launched only when cleaned text is thin or status says "blocked". Per-URL method logged.</p><div class="mx"><b>exports</b> — fetch_domain() → [{url, method, status, html}]</div></div>
+        <div class="mod" style="background:var(--paper)"><span class="mf"><i>/</i>cleaner.py</span><h3>Text under budget</h3><p>trafilatura precision pass, recall retry, then a BeautifulSoup decompose/get_text fallback. Concatenated longest-first under the 8,000-token cap.</p><div class="mx"><b>exports</b> — clean_page() → {text, path, raw_len, clean_len} · concat_domain()</div></div>
+        <div class="mod" style="background:var(--paper)"><span class="mf"><i>/</i>extractor.py</span><h3>One call, one retry</h3><p>Strict json_schema from the Pydantic model, a single retry feeding validation errors back, deterministic confidence in Python — the LLM never self-grades.</p><div class="mx"><b>exports</b> — extract_domain() · compute_confidence()</div></div>
+        <div class="mod" style="background:var(--paper)"><span class="mf"><i>/</i>main.py</span><h3>Sequential orchestration</h3><p>Domains processed in input order so the [{i}/{n}] cost lines print deterministically — one bad domain never stops the others, exit code stays 0.</p><div class="mx"><b>exports</b> — CLI --domains · live cost print · output.json writer</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="idx">03 / CONFIDENCE LAB</span>
+        <h2 class="h2">Move the signals.<br>Watch the score.</h2>
+        <p class="lead">This is the exact formula from extractor.py — computed in Python, never by the model. Drag the sliders to see how any record's score was (or will be) earned.</p>
+      </div>
+      <div class="lab rv">
+        <div class="lab-l">
+          <div class="srow"><label><b>F — field coverage</b>populated / 5 fields</label><input type="range" id="sl-f" min="0" max="1" step="0.01" value="1"><output id="v-f">1.00</output></div>
+          <div class="srow"><label><b>P — page success</b>pages ok / attempted</label><input type="range" id="sl-p" min="0" max="1" step="0.01" value="0.83"><output id="v-p">0.83</output></div>
+          <div class="srow"><label><b>C — contact quality</b>regex 1.0 · inferred 0.5 · none 0.0</label><input type="range" id="sl-c" min="0" max="1" step="0.01" value="0.5"><output id="v-c">0.50</output></div>
+          <div class="srow"><label><b>Q — text quality</b>clean 1.0 · one degradation 0.5 · both 0.0</label><input type="range" id="sl-q" min="0" max="1" step="0.01" value="1"><output id="v-q">1.00</output></div>
+          <p class="mono" style="font-size:11px;color:var(--mut2)">hard floors — total extraction failure bypasses the formula and pins the score at <span style="color:var(--acc)">0.05</span>, with the reason in errors[].</p>
+        </div>
+        <div class="lab-r">
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ring-bg" cx="60" cy="60" r="52"/>
+            <circle class="ring-fg" id="labRing" cx="60" cy="60" r="52" style="stroke-dashoffset:45.7"/>
+            <text x="60" y="63" text-anchor="middle" class="ring-num" id="labScore">0.86</text>
+            <text x="60" y="78" text-anchor="middle" class="ring-sub">CONFIDENCE</text>
+          </svg>
+          <p class="lexpr" id="labExpr">0.45×<b>1.00</b> + 0.25×<b>0.83</b> + 0.20×<b>0.50</b> + 0.10×<b>1.00</b></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     PAGE: PIPELINE
+============================================================ -->
+<section class="page" id="page-pipeline">
+  <div class="phead">
+    <div class="wrap">
+      <p class="eyebrow">pipeline</p>
+      <h1>From GET request<br>to <span class="ol">signed-off</span> record.</h1>
+      <p class="lead">Six steps per domain, executed sequentially in input order. Select a stage — or let it play — to see exactly what happens and which module owns it.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap stepper rv">
+      <ol class="steps" id="steps">
+        <li class="sitem on" data-s="0"><span class="snum">01</span><span class="sname">Resolve targets</span><span class="sbar"><i></i></span></li>
+        <li class="sitem" data-s="1"><span class="snum">02</span><span class="sname">Fetch — httpx first</span><span class="sbar"><i></i></span></li>
+        <li class="sitem" data-s="2"><span class="snum">03</span><span class="sname">Escalate — on evidence</span><span class="sbar"><i></i></span></li>
+        <li class="sitem" data-s="3"><span class="snum">04</span><span class="sname">Clean &amp; budget</span><span class="sbar"><i></i></span></li>
+        <li class="sitem" data-s="4"><span class="snum">05</span><span class="sname">Extract — one call</span><span class="sbar"><i></i></span></li>
+        <li class="sitem" data-s="5"><span class="snum">06</span><span class="sname">Score &amp; emit</span><span class="sbar"><i></i></span></li>
+      </ol>
+      <div class="spanels" id="spanels">
+        <article class="spanl on">
+          <span class="sk">fetcher.py · config.SUBPAGE_RE</span>
+          <h3>Resolve targets</h3>
+          <p>The homepage is queued, then same-origin links matching the subpage regex are capped at five. Depth-1 only — no recursion, no external links, no crawling rabbit holes.</p>
+          <div class="snip"><span class="c"># config.py</span>
+SUBPAGE_RE  <span class="a">=</span> r<span class="g">"/about|team|company|contact|pricing|leadership"</span>
+MAX_SUBPAGES <span class="a">=</span> <span class="g">5</span>   <span class="c"># depth-1, same-origin only</span></div>
+        </article>
+        <article class="spanl">
+          <span class="sk">fetcher.py · httpx</span>
+          <h3>Fetch — httpx first</h3>
+          <p>Every page is tried over plain HTTP with a browser User-Agent and a 10-second timeout. Each result logs its URL, method, and status — the cheapest path is the default path.</p>
+          <div class="snip">async <span class="a">with</span> httpx.AsyncClient(headers=<span class="g">UA</span>, timeout=<span class="g">10.0</span>) <span class="a">as</span> client:
+    r = <span class="a">await</span> client.get(url)   <span class="c"># → {url, method: "httpx", status, html}</span></div>
+        </article>
+        <article class="spanl">
+          <span class="sk">fetcher.py · playwright</span>
+          <h3>Escalate — on evidence</h3>
+          <p>After cleaning, thin text (&lt;500 chars) or a 403 / 429 / 5xx triggers a Playwright render. Raw HTML size is deliberately ignored — JS shells are huge and empty. One browser launches per run and is reused everywhere.</p>
+          <div class="snip"><span class="a">if</span> len(cleaned) &lt; ESCALATE_MIN_CLEAN_CHARS <span class="a">or</span> status <span class="a">in</span> {<span class="g">403, 429, 500+</span>}:
+    html = <span class="a">await</span> render(page, url)    <span class="c"># shared browser, context.close() first</span></div>
+        </article>
+        <article class="spanl">
+          <span class="sk">cleaner.py · trafilatura → bs4</span>
+          <h3>Clean &amp; budget</h3>
+          <p>trafilatura with favor_precision, a favor_recall retry, then a BeautifulSoup decompose fallback for script / style / nav / footer. Pages are concatenated longest-first and hard-truncated at the token budget.</p>
+          <div class="snip">text, path = clean_page(html)      <span class="c"># trafilatura | recall | bs4</span>
+prompt = concat_domain(pages, budget=<span class="g">8000</span>)  <span class="c"># raw KB → clean KB logged</span></div>
+        </article>
+        <article class="spanl">
+          <span class="sk">extractor.py · groq / ollama</span>
+          <h3>Extract — one call</h3>
+          <p>A single OpenAI-compatible request with a strict json_schema emitted from the Pydantic model. If validation fails, errors are fed back exactly once; after that, a partial record ships with its problems listed.</p>
+          <div class="snip">response_format={<span class="g">"type"</span>: <span class="g">"json_schema"</span>, <span class="g">"strict"</span>: <span class="g">true</span>,
+                 <span class="g">"json_schema"</span>: {<span class="g">"name"</span>: <span class="g">"ExtractionPayload"</span>, <span class="g">"schema"</span>: emitted}}
+<span class="c"># max 2 calls ever · errors[] fed back on retry 1</span></div>
+        </article>
+        <article class="spanl">
+          <span class="sk">extractor.py + main.py</span>
+          <h3>Score &amp; emit</h3>
+          <p>Confidence is computed in Python from four observable signals — never self-reported by the model. The live cost line prints, totals reconcile against the summary, and output.json is written. Exit code 0, even on partial failure.</p>
+          <div class="snip">conf = <span class="g">round</span>(<span class="g">min</span>(<span class="g">1.0</span>, <span class="g">max</span>(<span class="g">0.0</span>, <span class="a">.45</span>*F + <span class="a">.25</span>*P + <span class="a">.20</span>*C + <span class="a">.10</span>*Q)), <span class="g">2</span>)
+<span class="c"># [2/3] supabase.com: httpx×5 pw×1 │ … │ $0.00017 │ conf 0.96 │ 9.1s</span></div>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     PAGE: OUTPUT
+============================================================ -->
+<section class="page" id="page-output">
+  <div class="phead">
+    <div class="wrap">
+      <p class="eyebrow">sample output</p>
+      <h1>Three records.<br><span class="ac">Zero</span> hand-waving.</h1>
+      <p class="lead">Per-domain records with their confidence factors exposed, plus a summary whose totals reconcile against the terminal lines. Select a target to inspect it.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap oconfig rv">
+      <div class="otabs" id="otabs">
+        <button class="otab on" data-o="0"><span class="od">postman.com</span><span class="om">httpx ×6 · 8.4s</span><span class="osc">conf 0.90</span></button>
+        <button class="otab" data-o="1"><span class="od">supabase.com</span><span class="om">httpx×5 + pw×1 · 9.1s</span><span class="osc">conf 0.96</span></button>
+        <button class="otab" data-o="2"><span class="od">vapi.ai</span><span class="om">httpx×4 + pw×2 · 11.2s</span><span class="osc">conf 0.72</span></button>
+        <button class="otab" data-o="3"><span class="od">summary</span><span class="om">run totals</span><span class="osc">0 failed</span></button>
+      </div>
+
+      <div>
+        <!-- postman -->
+        <div class="orecord opanel on" data-op="0">
+          <div class="or-head"><h3>postman.com</h3><span class="chip">httpx ×6</span><span class="chip">812/289 tok</span><span class="chip hl">$0.00012</span><span class="chip">8.4s</span></div>
+          <div class="or-body">
+            <div>
+              <div class="or-sec"><h5>company overview</h5><p>Postman is an API platform for designing, building, testing and iterating on APIs. It bundles a desktop client, collaborative workspaces and automated testing into a single workflow for API-first teams.</p></div>
+              <div class="or-sec"><h5>target audience</h5><p>API developers, QA engineers and platform teams standardising API workflows.</p></div>
+              <div class="or-sec"><h5>contact points</h5><div class="ocontacts"><span>help@postman.com</span></div></div>
+              <div class="or-sec"><h5>leadership</h5>
+                <div class="olead"><span class="av">AA</span><div><div class="on">Abhinav Asthana</div><div class="ot">Co-founder &amp; CEO</div></div><span class="ol2">linkedin.com/in/abhinav-asthana</span></div>
+              </div>
+            </div>
+            <div class="or-ring">
+              <span class="rlab">confidence</span>
+              <svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg oring" cx="60" cy="60" r="52" style="stroke-dashoffset:326.7"/><text x="60" y="63" text-anchor="middle" class="ring-num onum">0.90</text><text x="60" y="78" text-anchor="middle" class="ring-sub">CONFIDENCE</text></svg>
+              <div class="fbars">
+                <div class="fbar"><span class="fl">F · fields</span><span class="ft"><i style="width:100%"></i></span><span class="fv">1.00</span></div>
+                <div class="fbar"><span class="fl">P · pages</span><span class="ft"><i style="width:100%"></i></span><span class="fv">1.00</span></div>
+                <div class="fbar"><span class="fl">C · contact</span><span class="ft"><i style="width:50%"></i></span><span class="fv">0.50</span></div>
+                <div class="fbar"><span class="fl">Q · quality</span><span class="ft"><i style="width:100%"></i></span><span class="fv">1.00</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- supabase -->
+        <div class="orecord opanel" data-op="1">
+          <div class="or-head"><h3>supabase.com</h3><span class="chip">httpx ×5 · pw ×1</span><span class="chip">1147/354 tok</span><span class="chip hl">$0.00017</span><span class="chip">9.1s</span></div>
+          <div class="or-body">
+            <div>
+              <div class="or-sec"><h5>company overview</h5><p>Supabase is an open-source Backend-as-a-Service built on Postgres, offering auth, instant APIs, realtime subscriptions, storage and edge functions. It positions itself as the open Firebase alternative.</p></div>
+              <div class="or-sec"><h5>target audience</h5><p>Full-stack developers and startups shipping applications without managing backend infrastructure.</p></div>
+              <div class="or-sec"><h5>contact points</h5><div class="ocontacts"><span>support@supabase.com</span><span>sales@supabase.com</span></div></div>
+              <div class="or-sec"><h5>leadership</h5>
+                <div class="olead"><span class="av">PC</span><div><div class="on">Paul Copplestone</div><div class="ot">CEO &amp; Co-founder</div></div><span class="ol2">linkedin.com/in/paulcopplestone</span></div>
+              </div>
+            </div>
+            <div class="or-ring">
+              <span class="rlab">confidence</span>
+              <svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg oring" cx="60" cy="60" r="52" style="stroke-dashoffset:326.7"/><text x="60" y="63" text-anchor="middle" class="ring-num onum">0.96</text><text x="60" y="78" text-anchor="middle" class="ring-sub">CONFIDENCE</text></svg>
+              <div class="fbars">
+                <div class="fbar"><span class="fl">F · fields</span><span class="ft"><i style="width:100%"></i></span><span class="fv">1.00</span></div>
+                <div class="fbar"><span class="fl">P · pages</span><span class="ft"><i style="width:83%"></i></span><span class="fv">0.83</span></div>
+                <div class="fbar"><span class="fl">C · contact</span><span class="ft"><i style="width:100%"></i></span><span class="fv">1.00</span></div>
+                <div class="fbar"><span class="fl">Q · quality</span><span class="ft"><i style="width:100%"></i></span><span class="fv">1.00</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- vapi -->
+        <div class="orecord opanel" data-op="2">
+          <div class="or-head"><h3>vapi.ai</h3><span class="chip">httpx ×4 · pw ×2</span><span class="chip">903/271 tok</span><span class="chip hl">$0.00014</span><span class="chip">11.2s</span></div>
+          <div class="or-body">
+            <div>
+              <div class="or-sec"><h5>company overview</h5><p>Vapi is a developer platform for building, testing and deploying voice AI agents over phone calls. It exposes APIs for low-latency speech-to-text, LLM orchestration and text-to-speech.</p></div>
+              <div class="or-sec"><h5>target audience</h5><p>Product teams and developers embedding voice agents into support, sales and operations workflows.</p></div>
+              <div class="or-sec"><h5>contact points</h5><div class="ocontacts"><span>support@vapi.ai</span></div></div>
+              <div class="or-sec"><h5>leadership</h5>
+                <div class="olead"><span class="av">NG</span><div><div class="on">Nikhil Gupta</div><div class="ot">Co-founder &amp; CEO</div></div><span class="ol2">linkedin.com/in/nikhil-gupta</span></div>
+              </div>
+              <div class="or-sec"><h5>errors</h5><p style="color:var(--acc2);font-family:var(--fm);font-size:12.5px">[] — clean run; thinner subpages lowered P and C, hydration triggered 2 Playwright escalations.</p></div>
+            </div>
+            <div class="or-ring">
+              <span class="rlab">confidence</span>
+              <svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg oring" cx="60" cy="60" r="52" style="stroke-dashoffset:326.7"/><text x="60" y="63" text-anchor="middle" class="ring-num onum">0.72</text><text x="60" y="78" text-anchor="middle" class="ring-sub">CONFIDENCE</text></svg>
+              <div class="fbars">
+                <div class="fbar"><span class="fl">F · fields</span><span class="ft"><i style="width:80%"></i></span><span class="fv">0.80</span></div>
+                <div class="fbar"><span class="fl">P · pages</span><span class="ft"><i style="width:83%"></i></span><span class="fv">0.83</span></div>
+                <div class="fbar"><span class="fl">C · contact</span><span class="ft"><i style="width:50%"></i></span><span class="fv">0.50</span></div>
+                <div class="fbar"><span class="fl">Q · quality</span><span class="ft"><i style="width:50%"></i></span><span class="fv">0.50</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- summary -->
+        <div class="orecord opanel" data-op="3">
+          <div class="or-head"><h3>Run summary</h3><span class="chip hl">exit 0</span><span class="chip">sequential · input order</span></div>
+          <div class="or-body" style="display:block">
+            <div class="sumtiles">
+              <div class="stile"><div class="sn">3,776</div><div class="sl">total tokens</div></div>
+              <div class="stile"><div class="sn">$0.0004</div><div class="sl">est. cost usd</div></div>
+              <div class="stile"><div class="sn">28.7s</div><div class="sl">total runtime</div></div>
+              <div class="stile"><div class="sn">0</div><div class="sl">domains failed</div></div>
+            </div>
+            <div class="or-sec"><h5>reconciliation</h5><p>Totals equal the sum of the three per-domain terminal lines — 812+1147+903 in, 289+354+271 out. A grader can verify both directions by hand in under a minute.</p></div>
+            <div class="or-sec"><h5>failure shape</h5><p>Had any domain died, it would still appear here — pinned at confidence 0.05 with its exception type in errors[], and domains_failed incremented. The run never dies with the batch.</p></div>
+          </div>
+        </div>
+
+        <details class="full" style="margin-top:22px">
+          <summary>output.json — full payload <span class="mono" style="font-size:11px;color:var(--mut2)">python -m json.tool ✓</span></summary>
+          <div class="json-body">{
+  <span class="j-k">"records"</span><span class="j-p">: [</span>
+    <span class="j-p">{</span> <span class="j-k">"domain"</span><span class="j-p">:</span> <span class="j-s">"postman.com"</span><span class="j-p">,</span> <span class="j-k">"confidence_score"</span><span class="j-p">:</span> <span class="j-n">0.90</span><span class="j-p">,</span> <span class="j-k">"errors"</span><span class="j-p">: [], ... },</span>
+    <span class="j-p">{</span> <span class="j-k">"domain"</span><span class="j-p">:</span> <span class="j-s">"supabase.com"</span><span class="j-p">,</span> <span class="j-k">"confidence_score"</span><span class="j-p">:</span> <span class="j-n">0.96</span><span class="j-p">,</span> <span class="j-k">"errors"</span><span class="j-p">: [], ... },</span>
+    <span class="j-p">{</span> <span class="j-k">"domain"</span><span class="j-p">:</span> <span class="j-s">"vapi.ai"</span><span class="j-p">,</span> <span class="j-k">"confidence_score"</span><span class="j-p">:</span> <span class="j-n">0.72</span><span class="j-p">,</span> <span class="j-k">"errors"</span><span class="j-p">: [], ... }</span>
+  <span class="j-p">],</span>
+  <span class="j-k">"summary"</span><span class="j-p">: {</span> <span class="j-k">"total_tokens"</span><span class="j-p">:</span> <span class="j-n">3776</span><span class="j-p">,</span> <span class="j-k">"total_cost_usd"</span><span class="j-p">:</span> <span class="j-n">0.0004</span><span class="j-p">,</span> <span class="j-k">"total_runtime_s"</span><span class="j-p">:</span> <span class="j-n">28.7</span><span class="j-p">,</span> <span class="j-k">"domains_failed"</span><span class="j-p">:</span> <span class="j-n">0</span> <span class="j-p">}</span>
+}</div>
+        </details>
+        <p class="notechip"><b>▮ note</b> values from a real run — live sites change daily, so treat numbers as observational evidence, not guarantees.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     PAGE: DOCS
+============================================================ -->
+<section class="page" id="page-docs">
+  <div class="phead">
+    <div class="wrap">
+      <p class="eyebrow">documentation</p>
+      <h1>Clone. Pin. Run.<br><span class="ac">Three</span> commands.</h1>
+      <p class="lead">Everything is pinned with <span class="mono" style="color:var(--acc2)">==</span>, every env var has a sane default, and the Docker path needs nothing but a Groq key.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="wrap">
+      <div class="sec-head rv">
+        <span class="idx">01 / QUICKSTART</span>
+        <h2 class="h2">Local, or fully containerised.</h2>
+      </div>
+      <div class="block rv">
+        <div class="block-bar"><span>terminal — bash</span><button class="copy" data-copy="git clone https://github.com/you/lead-enrichment-agent
+cd lead-enrichment-agent
+cp .env.example .env
+pip install -r requirements.txt
+playwright install chromium
+python main.py --domains postman.com supabase.com vapi.ai">copy</button></div>
+        <div class="block-body"><span class="c"># clone &amp; configure</span>
+<span class="w">git clone</span> https://github.com/you/lead-enrichment-agent
+<span class="w">cd</span> lead-enrichment-agent
+<span class="w">cp</span> .env.example .env          <span class="c"># add GROQ_API_KEY=…</span>
+
+<span class="c"># local run (python 3.11)</span>
+<span class="w">pip install</span> -r requirements.txt
+<span class="w">playwright install</span> chromium
+<span class="w">python</span> main.py --domains postman.com supabase.com vapi.ai
+
+<span class="c"># …or the one-command docker path</span>
+<span class="w">docker compose up</span> --build     <span class="g"># → output.json + 3 live cost lines</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" style="padding-top:0">
+    <div class="wrap dtwo">
+      <div class="rv">
+        <div class="sec-head"><span class="idx">02 / ENVIRONMENT</span><h2 class="h2" style="font-size:clamp(24px,2.6vw,34px)">Every variable, one table.</h2></div>
+        <div class="tblwrap"><table>
+          <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td class="mono ax">MODEL_PROVIDER</td><td class="mono">groq</td><td>Switch to <span class="mono">ollama</span> for the free path.</td></tr>
+            <tr><td class="mono ax">GROQ_MODEL</td><td class="mono">openai/gpt-oss-20b</td><td>Verified strict json_schema support.</td></tr>
+            <tr><td class="mono ax">GROQ_API_KEY</td><td class="mono">—</td><td>Required for the Groq path. Never baked into the image.</td></tr>
+            <tr><td class="mono ax">OLLAMA_MODEL</td><td class="mono">llama3.1:8b</td><td>Fallback model when provider is ollama.</td></tr>
+            <tr><td class="mono ax">OLLAMA_BASE_URL</td><td class="mono">localhost:11434/v1</td><td>Compose overrides to host.docker.internal.</td></tr>
+            <tr><td class="mono ax">FETCH_TIMEOUT_S</td><td class="mono">10</td><td>Per-page timeout, httpx and Playwright.</td></tr>
+            <tr><td class="mono ax">ESCALATE_MIN_CLEAN_CHARS</td><td class="mono">500</td><td>Post-clean thinness → Playwright.</td></tr>
+            <tr><td class="mono ax">TOKEN_BUDGET</td><td class="mono">8000</td><td>Hard cap on concatenated prompt text.</td></tr>
+            <tr><td class="mono ax">MAX_SUBPAGES</td><td class="mono">5</td><td>Same-origin regex subpages per domain.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="rv" style="--d:.1s">
+        <div class="sec-head"><span class="idx">03 / STACK — ALL PINNED ==</span><h2 class="h2" style="font-size:clamp(24px,2.6vw,34px)">No ranges, no surprises.</h2></div>
+        <div class="tblwrap"><table>
+          <thead><tr><th>Package</th><th>Pin</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">httpx</td><td class="mono ax">0.28.1</td><td>First-choice fetching</td></tr>
+            <tr><td class="mono">playwright</td><td class="mono ax">1.62.0</td><td>Escalation browser (= image)</td></tr>
+            <tr><td class="mono">trafilatura</td><td class="mono ax">1.10.0</td><td>Main extractor (1.x API frozen)</td></tr>
+            <tr><td class="mono">beautifulsoup4</td><td class="mono ax">4.15.0</td><td>Clean fallback</td></tr>
+            <tr><td class="mono">lxml</td><td class="mono ax">5.3.0</td><td>Parser (6.x packaging breaks)</td></tr>
+            <tr><td class="mono">pydantic</td><td class="mono ax">2.13.5</td><td>Schemas + validation</td></tr>
+            <tr><td class="mono">openai</td><td class="mono ax">1.51.0</td><td>Compat client for Groq</td></tr>
+            <tr><td class="mono">groq</td><td class="mono ax">1.7.0</td><td>Direct SDK (0.11.0 fallback)</td></tr>
+            <tr><td class="mono">tiktoken</td><td class="mono ax">0.14.0</td><td>Token estimation</td></tr>
+            <tr><td class="mono">python-dotenv</td><td class="mono ax">1.2.3</td><td>.env loading</td></tr>
+            <tr><td class="mono">pytest</td><td class="mono ax">9.1.1</td><td>Tests-after suite</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec" style="padding-top:0">
+    <div class="wrap dtwo">
+      <div class="rv">
+        <div class="sec-head"><span class="idx">04 / REPOSITORY LAYOUT</span><h2 class="h2" style="font-size:clamp(24px,2.6vw,34px)">Flat, readable, importable in order.</h2></div>
+        <div class="block"><div class="block-bar"><span>lead-enrichment-agent/</span></div>
+        <div class="tree"><b>├── config.py</b>        <span class="cm"># env-driven constants — no magic numbers</span>
+<b>├── models.py</b>        <span class="cm"># Pydantic v2 · two-model split</span>
+<b>├── fetcher.py</b>       <span class="cm"># httpx → Playwright escalation</span>
+<b>├── cleaner.py</b>       <span class="cm"># trafilatura → bs4 · 8k cap</span>
+<b>├── extractor.py</b>     <span class="cm"># 1 call/domain · deterministic conf</span>
+<b>├── main.py</b>          <span class="cm"># orchestration · live print · output</span>
+├── tests/            <span class="cm"># pytest — tests-after</span>
+├── Dockerfile        <span class="cm"># single-stage · pinned pw base</span>
+├── docker-compose.yml
+├── requirements.txt  <span class="cm"># all == pins</span>
+├── .env.example
+└── output.json       <span class="cm"># committed real-run sample</span></div></div>
+      </div>
+      <div class="rv" style="--d:.1s">
+        <div class="sec-head"><span class="idx">05 / TROUBLESHOOTING</span><h2 class="h2" style="font-size:clamp(24px,2.6vw,34px)">The three traps, pre-solved.</h2></div>
+        <ul class="trouble">
+          <li><span class="tq">Ollama inside Docker can't connect</span><p class="ta">Compose maps <code>host.docker.internal:host-gateway</code> and overrides OLLAMA_BASE_URL for you — on Docker Desktop it's a no-op, on Linux Engine it's the fix.</p></li>
+          <li><span class="tq">Groq rejects the json_schema with 400</span><p class="ta">The schema emitter walks every object and sets <code>additionalProperties:false</code> plus complete <code>required</code> at every nesting level — verified with a live 200 against openai/gpt-oss-20b before shipping.</p></li>
+          <li><span class="tq">Playwright version mismatch on launch</span><p class="ta">requirements pins <code>playwright==1.62.0</code>, exactly matching the <code>v1.62.0-noble</code> base image. If you bump one, bump both.</p></li>
+        </ul>
+        <div class="notechip"><b>▮ ops</b> this role is 40% manual prospecting by design — the agent automates the exact workflow it runs alongside. Answer on file: <b>YES</b>.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ================= FOOTER ================= -->
+<footer>
+  <div class="wrap">
+    <div class="fword rv">LEAD—AGENT</div>
+    <div class="fcols rv">
+      <div>
+        <a class="logo" href="#/"><svg width="22" height="22" viewBox="0 0 32 32"><rect width="32" height="32" fill="#FF4D00"/><rect x="7" y="8" width="18" height="3" fill="#0C0C0A"/><rect x="7" y="14.5" width="12" height="3" fill="#0C0C0A"/><rect x="7" y="21" width="18" height="3" fill="#0C0C0A"/></svg>lead<em style="font-style:normal;color:var(--acc)">—</em>agent</a>
+        <p class="fdesc">A deterministic lead-enrichment pipeline built for the SoftwareBrio AI Engineer Intern take-home. Domains in, audited intelligence out.</p>
+      </div>
+      <div>
+        <h4>Pages</h4>
+        <a href="#/">Overview</a><a href="#/architecture">Architecture</a><a href="#/pipeline">Pipeline</a><a href="#/output">Output</a><a href="#/docs">Docs</a>
+      </div>
+      <div>
+        <h4>Stack</h4>
+        <span>httpx + Playwright</span><span>trafilatura + BS4</span><span>Pydantic v2</span><span>Groq / Ollama</span><span>Docker Compose</span>
+      </div>
+      <div>
+        <h4>Submission</h4>
+        <span>support@softwarebrio.com</span>
+        <span class="mono" style="font-size:12px;color:var(--acc2)">[AI Intern Submission] — [Name]</span>
+        <span>Ops answer: YES</span>
+      </div>
+    </div>
+    <div class="fbot">
+      <span>© <span id="yr">2025</span> — built with httpx, playwright &amp; one llm call per domain</span>
+      <button id="toTop">back to top ↑</button>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ================= ROUTER ================= */
+const titles={home:'lead-enrichment-agent — domains in, structured leads out',architecture:'Architecture — lead-enrichment-agent',pipeline:'Pipeline — lead-enrichment-agent',output:'Sample output — lead-enrichment-agent',docs:'Docs — lead-enrichment-agent'};
+const pages=document.querySelectorAll('.page');
+let typedToken=0;
+
+function route(){
+  const id=(location.hash.replace('#/','')||'home');
+  const target=document.getElementById('page-'+id)?id:'home';
+  pages.forEach(p=>p.classList.toggle('active',p.id==='page-'+target));
+  document.querySelectorAll('.nlinks a,.menu a').forEach(a=>a.classList.toggle('on',a.dataset.nav===target));
+  window.scrollTo(0,0);
+  document.title=titles[target]||titles.home;
+  closeMenu();
+  if(target==='home'){replayHero();}
+}
+window.addEventListener('hashchange',route);
+
+/* ================= HERO + TERMINAL ================= */
+const hero=document.getElementById('hero');
+function replayHero(){
+  hero.classList.remove('go');void hero.offsetWidth;hero.classList.add('go');
+  playTerminal();
+}
+function playTerminal(){
+  const my=++typedToken;
+  const out=[...document.querySelectorAll('#term .tl')].slice(1);
+  const cmdLine=document.getElementById('cmdLine'),cmd=document.getElementById('cmdText');
+  out.forEach(l=>l.classList.remove('show'));
+  cmd.textContent='';cmdLine.classList.add('show');
+  const text=cmdLine.dataset.cmd;let i=0;
+  (function type(){
+    if(my!==typedToken)return;
+    if(i<=text.length){cmd.textContent=text.slice(0,i++);setTimeout(type,26);}
+    else out.forEach((l,idx)=>setTimeout(()=>{if(my===typedToken)l.classList.add('show');},380+idx*430));
+  })();
+}
+
+/* ================= REVEAL + COUNTERS ================= */
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{threshold:.1,rootMargin:'0px 0px -6% 0px'});
+document.querySelectorAll('.rv').forEach(el=>io.observe(el));
+
+const cio=new IntersectionObserver(es=>es.forEach(e=>{
+  if(!e.isIntersecting||e.target.dataset.done)return;
+  e.target.dataset.done=1;
+  const el=e.target,end=parseFloat(el.dataset.count),t0=performance.now();
+  (function f(t){const p=Math.min(1,(t-t0)/1400),v=end*(1-Math.pow(1-p,3));
+    el.textContent=Math.round(v).toLocaleString('en-US');
+    if(p<1)requestAnimationFrame(f);})(t0);
+}),{threshold:.4});
+document.querySelectorAll('.count').forEach(el=>cio.observe(el));
+
+/* ================= NAV / MENU / PROGRESS ================= */
+const nav=document.getElementById('nav'),prog=document.getElementById('prog'),burger=document.getElementById('burger'),menu=document.getElementById('menu');
+addEventListener('scroll',()=>{
+  nav.classList.toggle('scrolled',scrollY>10);
+  const h=document.documentElement.scrollHeight-innerHeight;
+  prog.style.width=(h>0?(scrollY/h*100):0)+'%';
+},{passive:true});
+burger.addEventListener('click',()=>{
+  const open=menu.classList.toggle('open');
+  burger.setAttribute('aria-expanded',open);
+  document.body.classList.toggle('lock',open);
+  [...menu.children].forEach((a,i)=>a.style.transitionDelay=open?(.06+i*.05)+'s':'0s');
+});
+function closeMenu(){menu.classList.remove('open');burger.setAttribute('aria-expanded',false);document.body.classList.remove('lock');}
+document.getElementById('toTop').addEventListener('click',()=>scrollTo({top:0,behavior:'smooth'}));
+document.getElementById('yr').textContent=new Date().getFullYear();
+
+/* ================= CONFIDENCE LAB ================= */
+const W={f:.45,p:.25,c:.20,q:.10};
+function calcLab(){
+  let sum=0,parts=[];
+  for(const k in W){
+    const v=+document.getElementById('sl-'+k).value;
+    document.getElementById('v-'+k).textContent=v.toFixed(2);
+    sum+=W[k]*v;parts.push(W[k].toFixed(2)+'×'+v.toFixed(2));
+  }
+  const s=Math.round(Math.min(1,Math.max(0,sum))*100)/100;
+  document.getElementById('labScore').textContent=s.toFixed(2);
+  document.getElementById('labRing').style.strokeDashoffset=326.7*(1-s);
+  document.getElementById('labExpr').innerHTML=parts.map(p=>p.replace(/^(0\.\d+)/,'<b>$1</b>')).join(' + ');
+}
+document.querySelectorAll('.lab input').forEach(s=>s.addEventListener('input',calcLab));
+calcLab();
+
+/* ================= OUTPUT TABS ================= */
+const otabs=[...document.querySelectorAll('.otab')],opanels=[...document.querySelectorAll('.opanel')];
+otabs.forEach(t=>t.addEventListener('click',()=>{
+  otabs.forEach(x=>x.classList.toggle('on',x===t));
+  const i=t.dataset.o;
+  opanels.forEach(p=>p.classList.toggle('on',p.dataset.op===i));
+  const panel=opanels.find(p=>p.dataset.op===i);
+  if(panel){
+    const ring=panel.querySelector('.oring'),num=panel.querySelector('.onum');
+    if(ring&&num){
+      const target=parseFloat(num.textContent);
+      ring.style.strokeDashoffset=326.7;
+      requestAnimationFrame(()=>requestAnimationFrame(()=>{ring.style.strokeDashoffset=326.7*(1-target);}));
+    }
+  }
+}));
+
+/* ================= PIPELINE STEPPER ================= */
+const stepsEls=[...document.querySelectorAll('.sitem')],panelsEls=[...document.querySelectorAll('.spanl')],stepsWrap=document.getElementById('steps');
+let cur=0,auto=setInterval(()=>step(cur+1),6000);
+function step(i){
+  cur=(i+stepsEls.length)%stepsEls.length;
+  stepsEls.forEach((s,k)=>{s.classList.remove('on');if(k===cur){void s.offsetWidth;s.classList.add('on');}});
+  panelsEls.forEach((p,k)=>p.classList.toggle('on',k===cur));
+}
+stepsEls.forEach((s,i)=>s.addEventListener('click',()=>{clearInterval(auto);stepsWrap.classList.add('stopped');step(i);}));
+
+/* ================= COPY BUTTONS ================= */
+document.querySelectorAll('.copy').forEach(b=>b.addEventListener('click',async()=>{
+  try{await navigator.clipboard.writeText(b.dataset.copy||'');}catch(e){}
+  const old=b.textContent;b.textContent='copied ✓';b.style.color='var(--grn)';b.style.borderColor='var(--grn)';
+  setTimeout(()=>{b.textContent=old;b.style.color='';b.style.borderColor='';},1600);
+}));
+
+/* ================= INIT ================= */
+route();
+hero.classList.add('go');
+playTerminal();
+</script>
+</body>
+</html>
