@@ -87,7 +87,12 @@ def test_live_print_format(tmp_path, monkeypatch, capsys):
 
 
 def test_degraded_math(tmp_path, monkeypatch):
+    import config
     import main
+    # Hermetic guard: never invoke the live Tavily fallback from this test.
+    # setenv documents intent; setattr is what takes effect (config binds at import).
+    monkeypatch.setenv("TAVILY_ENABLED", "0")
+    monkeypatch.setattr(config, "TAVILY_ENABLED", False)
     import fetcher
     import extractor
     import cleaner
