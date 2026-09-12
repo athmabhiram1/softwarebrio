@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 .venv/
 .git/
+LOOM_SCRIPT.md
+front.html
