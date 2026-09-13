@@ -8,3 +8,11 @@ __pycache__/
 LOOM_SCRIPT.md
 front.html
 front1.html
+.omo/
+.playwright-mcp/
+output/*.log
+output/frontbon.html
+output/full_output_pretty.json
+output/test_*
+results-*.png
+FINAL_VERIFICATION.md

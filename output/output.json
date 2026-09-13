@@ -2,7 +2,7 @@
   "records": [
     {
       "company_overview": "Postman is the leading collaboration platform for API-development, used by more than 40 million users and 500,000 companies worldwide. Postman simplifies each step of the API lifecycle and streamlines collaboration so you can create better APIs\u2014faster.",
-      "target_audience": "Engineers, developers, and teams building and managing APIs at all scales.",
+      "target_audience": "Engineers, API teams, and enterprises building, testing, and managing APIs at scale.",
       "contact_points": [
         "info@postman.com",
         "info-jp@postman.com",
@@ -27,47 +27,63 @@
       ],
       "confidence_score": 0.95,
       "errors": [],
-      "domain": "postman.com"
+      "domain": "postman.com",
+      "leadership_sources": {}
     },
     {
-      "company_overview": "Supabase is an open\u2011source Firebase alternative that provides a Postgres database, authentication, storage, real\u2011time, and edge functions, all managed through a single dashboard. It offers a fully managed, scalable platform with built\u2011in Row Level Security and instant REST APIs for rapid application development.",
-      "target_audience": "Developers building web and mobile applications, startups, and enterprises looking for a scalable, open\u2011source backend.",
+      "company_overview": "Supabase is an open-source platform that provides a Postgres database with built-in authentication, real-time capabilities, and serverless functions. It offers a suite of tools and services that enable developers to build, scale, and deploy applications quickly without managing infrastructure.",
+      "target_audience": "Developers, startups, and SaaS companies looking for a scalable, open-source backend solution.",
       "contact_points": [],
       "leadership": [
         {
-          "name": "Jakob Steinn",
-          "title": "Co-founder & Tech Lead",
-          "linkedin_url": "https://linkedin.com/company/supabase"
+          "name": "Grant Huston",
+          "title": "",
+          "linkedin_url": "https://www.linkedin.com/in/grant-huston"
         }
       ],
-      "confidence_score": 0.71,
+      "confidence_score": 0.49,
       "errors": [
-        "company-page URL attributed to a person: Jakob Steinn"
+        "search_fallback: appended=1 backfilled=0"
       ],
-      "domain": "supabase.com"
+      "domain": "supabase.com",
+      "leadership_sources": {
+        "https://www.linkedin.com/in/grant-huston": "search_fallback"
+      }
     },
     {
-      "company_overview": "Vapi is a unified platform that enables enterprises to build, test, and deploy voice agents quickly. It offers orchestration, real-time monitoring, and enterprise-grade configurability for scalable, secure deployments.",
-      "target_audience": "Large enterprises and Fortune 100 companies seeking scalable, secure, and compliant voice agent solutions.",
+      "company_overview": "Vapi is a unified platform that enables enterprises to build, test, and deploy voice agents at scale. It provides orchestration, real-time monitoring, and enterprise\u2011grade configurability with sub\u2011500ms latency.",
+      "target_audience": "Enterprises and Fortune 100 companies seeking scalable, secure voice agent solutions.",
       "contact_points": [],
       "leadership": [
         {
           "name": "Jason Mitura",
           "title": "VP of Software Development",
           "linkedin_url": "https://linkedin.com/company/vapi-ai"
+        },
+        {
+          "name": "Gerard James Roy",
+          "title": "",
+          "linkedin_url": "https://www.linkedin.com/in/gerardjamesroy"
         }
       ],
-      "confidence_score": 0.89,
+      "confidence_score": 0.64,
       "errors": [
-        "company-page URL attributed to a person: Jason Mitura"
+        "company-page URL attributed to a person: Jason Mitura",
+        "search_fallback: appended=1 backfilled=0"
       ],
-      "domain": "vapi.ai"
+      "domain": "vapi.ai",
+      "leadership_sources": {
+        "https://linkedin.com/company/vapi-ai": "regex",
+        "https://www.linkedin.com/in/gerardjamesroy": "search_fallback"
+      }
     }
   ],
   "summary": {
-    "total_tokens": 19955,
-    "total_cost_usd": 0.001306,
-    "total_runtime_s": 49.11,
-    "domains_failed": 0
+    "total_tokens": 19584,
+    "total_cost_usd": 0.001195,
+    "total_runtime_s": 60.19,
+    "domains_failed": 0,
+    "tavily_calls": 2,
+    "tavily_credits": 2
   }
 }
