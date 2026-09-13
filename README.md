@@ -65,11 +65,11 @@ The checked-in sample covers postman.com, supabase.com, and vapi.ai. Real totals
 - Fallback: if leadership is missing or company-page only, one Tavily LinkedIn search can append up to 3 `/in/` profiles.
 - Output: records plus a `summary` with tokens, cost, runtime, failures, and Tavily counts.
 
-Confidence in one sentence: it blends 45% field completeness, 25% crawl success, 20% contact proof tier (page regex, model guess, or search fallback), and 10% extraction cleanliness, minus a small penalty when names don't match page text. See `PROJECT_EXPLAINED.md` in the repo root for the full walkthrough with code pointers.
+Confidence in one sentence: it blends 45% field completeness, 25% crawl success, 20% contact proof tier (page regex, model guess, or search fallback), and 10% extraction cleanliness, minus a small penalty when names don't match page text. See `docs/PROJECT_EXPLAINED.md` for the full walkthrough with code pointers.
 
 ## Bonus features
 
-Tavily fallback (`search_fallback.py`) fired on 2 of 3 sample domains: supabase.com appended Grant Huston and vapi.ai appended Gerard James Roy (each `appended=1 backfilled=0`), while postman.com needed nothing. Cost tracking prints per-domain tokens and USD on every live line and rolls them into `summary.total_tokens` / `summary.total_cost_usd`. Both are live-tested; full logs and hermetic tests live in `BONUS_VERIFICATION.md`.
+Tavily fallback (`search_fallback.py`) fired on 2 of 3 sample domains: supabase.com appended Grant Huston and vapi.ai appended Gerard James Roy (each `appended=1 backfilled=0`), while postman.com needed nothing. Cost tracking prints per-domain tokens and USD on every live line and rolls them into `summary.total_tokens` / `summary.total_cost_usd`. Both are live-tested; full logs and hermetic tests live in `docs/BONUS_VERIFICATION.md`.
 
 ## Output shape
 
@@ -144,14 +144,14 @@ Everything tunable lives in `config.py` and is overridden through `.env` (see `.
 - Scraping 30%: homepage plus 5 subpages, HTTP-first with browser escalation, boilerplate stripped before any model call.
 - LLM 25%: one strict-schema extraction per domain (overview, ICP, emails, leaders, all required) via Groq default plus Ollama fallback.
 - Resilience 20%: per-domain try/except with partial fallback, 0 failed across the 3-domain sample, retries and backoff logged in `errors`.
-- Code and docs 15%: pinned requirements, copy-paste Docker and local runs, this README plus `PROJECT_EXPLAINED.md` and `BONUS_VERIFICATION.md`.
+- Code and docs 15%: pinned requirements, copy-paste Docker and local runs, this README plus `docs/PROJECT_EXPLAINED.md` and `docs/BONUS_VERIFICATION.md`.
 - Loom 10%: 2 to 3 minute screencast (code map 30s, live run with cost lines 60s, output plus confidence 45s, limits and ops YES 15s).
 
 ## Submission
 
 - GitHub repo deliverable: clean modules, pinned `requirements.txt`, this README.
 - `output/output.json` sample for postman.com, supabase.com, vapi.ai (`{"records":[...],"summary":{...}}`); reruns default to `output.local.json`.
-- Tavily bonus plus cost tracking documented above; proof in `BONUS_VERIFICATION.md`.
+- Tavily bonus plus cost tracking documented above; proof in `docs/BONUS_VERIFICATION.md`.
 - Loom link (2 to 3 min max, covering code map, live run, output with confidence, limits, and ops YES): add link here.
 - Ops answer for the submission email: Are you 100% comfortable spending roughly 40% of your working hours on manual lead prospecting, email discovery, and account handling alongside your AI engineering tasks? (Yes / No) → **YES**
 - Send to support@softwarebrio.com with subject `[AI Intern Submission] - [Your Full Name]` and include your LinkedIn profile line in the same email.
