@@ -174,3 +174,38 @@ def test_empty_domains_exits_2():
     assert exc.value.code == 2
     # also test via main() entry with empty should exit 2
     # Missing domains case is covered by default - not error, but empty string must be 2
+
+
+def test_resolve_out_path_stamps_stable_names():
+    import main
+    from datetime import datetime
+
+    fixed = datetime(2025, 1, 2, 3, 4, 5)
+    assert main._resolve_out_path("output.json", fixed) == "output/output-20250102-030405.json"
+    assert main._resolve_out_path("/app/output/output.json", fixed) == "/app/output/output-20250102-030405.json"
+    assert main._resolve_out_path("output.local.json", fixed) == "output/output.local-20250102-030405.json"
+    assert main._resolve_out_path("output/output.local.json", fixed) == "output/output.local-20250102-030405.json"
+    assert main._resolve_out_path("out.json", fixed) == "out.json"
+    assert main._resolve_out_path("/tmp/custom.json", fixed) == "/tmp/custom.json"
+
+
+def test_resolve_out_path_creates_output_dir(tmp_path, monkeypatch):
+    import main
+    from datetime import datetime
+
+    monkeypatch.chdir(tmp_path)
+    fixed = datetime(2025, 1, 2, 3, 4, 5)
+    assert main._resolve_out_path("output.local.json", fixed) == "output/output.local-20250102-030405.json"
+    assert (tmp_path / "output").is_dir()
+
+
+def test_default_out_lands_in_output_dir(monkeypatch):
+    import importlib
+    import os
+
+    import config
+    import main
+
+    monkeypatch.delenv("OUTPUT_PATH", raising=False)
+    monkeypatch.setattr(config, "OUTPUT_PATH", importlib.reload(config).OUTPUT_PATH)
+    assert os.path.dirname(main.parse_args([]).out) == "output"

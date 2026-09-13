@@ -5,8 +5,10 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
+from datetime import datetime
 
 import config
 import cleaner
@@ -144,9 +146,31 @@ async def _process_single(domain: str, idx: int, n: int) -> tuple[CompanyRecord,
     return rec, est_tok + pt + ct, cost
 
 
+_STABLE_OUT_NAMES = frozenset({"output.json", "output.local.json"})
+
+
+def _resolve_out_path(out_path: str, now: datetime | None = None) -> str:
+    norm = out_path.replace("\\", "/")
+    if "/" not in norm and norm.rsplit("/", 1)[-1] in _STABLE_OUT_NAMES:
+        try:
+            os.makedirs("output", exist_ok=True)
+        except Exception:
+            pass
+        out_path = f"output/{norm}"
+    base = out_path.replace("\\", "/").rsplit("/", 1)[-1]
+    if base not in _STABLE_OUT_NAMES:
+        return out_path
+    stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
+    stem, dot, ext = out_path.rpartition(".")
+    if not dot:
+        return f"{out_path}-{stamp}"
+    return f"{stem}-{stamp}{dot}{ext}"
+
+
 async def run_batch(domains: list[str], out_path: str, provider: str | None = None) -> dict:
     if provider is not None:
         config.MODEL_PROVIDER = provider.strip().lower()
+    out_path = _resolve_out_path(out_path)
     n = len(domains)
     records: list[CompanyRecord] = []
     total_tokens = 0

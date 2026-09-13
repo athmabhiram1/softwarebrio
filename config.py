@@ -99,7 +99,7 @@ TARGET_DOMAINS: list[str] = [
     if d.strip()
 ]
 # Tracked real-run sample is output.json; local reruns default elsewhere.
-OUTPUT_PATH: str = os.getenv("OUTPUT_PATH", "output.local.json")
+OUTPUT_PATH: str = os.getenv("OUTPUT_PATH", "output/output.local.json")
 
 # --- Bonus seam (NOT-BUILT): search fallback -----------------------------------
 # Read here so the seam needs zero rework later; never called by core.

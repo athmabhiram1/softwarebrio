@@ -48,7 +48,7 @@ You'll see 3 live lines, one per domain, shaped like this:
 [{i}/{n}] {domain}: {mix} | raw {r}KB -> clean {c}KB (~{t} tok) | LLM {in}/{out} tok ${cost} | conf {s} | {sec}s | Tavily {n}/{nc}c
 ```
 
-Then check the JSON: `output.json` (Docker) or `output.local.json` (local run) holds `{"records": [...], "summary": {...}}`. Never a bare list. `--out` defaults to `output.local.json`, so reruns don't clobber the tracked `output.json` sample unless you pass `--out output.json`.
+Then check the JSON: `output.json` (Docker) or `output/output.local-<ts>.json` (local run, stamped) holds `{"records": [...], "summary": {...}}`. Never a bare list. The two stable names (`output.json`, `output.local.json`) are stamped `name-YYYYMMDD-HHMMSS.json`; bare names with no directory are routed into `output/` (created if missing), so reruns never clobber the tracked `output.json` sample; any other `--out` path is written verbatim.
 
 ## What it does (plain language)
 

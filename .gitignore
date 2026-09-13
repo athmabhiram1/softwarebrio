@@ -1,6 +1,7 @@
 .env
 output.local.json
 output-*.json
+output.local-*.json
 __pycache__/
 *.pyc
 .venv/
